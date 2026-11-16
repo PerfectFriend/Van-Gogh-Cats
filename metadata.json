@@ -1,0 +1,6 @@
+{
+  "name": "КриптоКотики Вана Гога",
+  "description": "Интерактивная P2P-галерея шедевров и AI-генератор криптокотиков в живописном стиле Винсента Вана Гога",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

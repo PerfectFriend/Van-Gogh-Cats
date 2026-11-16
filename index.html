@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      // Synchronously initialize React Fast Refresh preamble stubs
+      window.$RefreshReg$ = window.$RefreshReg$ || function() {};
+      window.$RefreshSig$ = window.$RefreshSig$ || function() { return function(type) { return type; }; };
+      window.__vite_plugin_react_preamble_installed__ = true;
+
+      // Gracefully handle Vite HMR websocket connection in sandboxed Cloud Run environment
+      (function() {
+        if (typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined') {
+          const OrigWebSocket = window.WebSocket;
+          window.WebSocket = function(url, protocols) {
+            const isViteHmr = (typeof protocols === 'string' && protocols.includes('vite-hmr')) ||
+                              (Array.isArray(protocols) && protocols.includes('vite-hmr')) ||
+                              (typeof url === 'string' && (url.includes('token=') || url.includes('24678') || url.includes('vite')));
+            if (isViteHmr) {
+              const target = new EventTarget();
+              Object.setPrototypeOf(target, OrigWebSocket.prototype);
+              target.url = String(url);
+              target.protocol = typeof protocols === 'string' ? protocols : 'vite-hmr';
+              target.readyState = 1; // WebSocket.OPEN
+              target.OPEN = 1;
+              target.CONNECTING = 0;
+              target.CLOSING = 2;
+              target.CLOSED = 3;
+              target.bufferedAmount = 0;
+              target.extensions = '';
+              target.binaryType = 'blob';
+              target.send = function() {};
+              target.close = function() {
+                target.readyState = 3;
+                target.dispatchEvent(new Event('close'));
+              };
+              setTimeout(() => {
+                target.dispatchEvent(new Event('open'));
+                target.dispatchEvent(new MessageEvent('message', {
+                  data: JSON.stringify({ type: 'connected' })
+                }));
+              }, 0);
+              return target;
+            }
+            return new OrigWebSocket(url, protocols);
+          };
+          window.WebSocket.CONNECTING = 0;
+          window.WebSocket.OPEN = 1;
+          window.WebSocket.CLOSING = 2;
+          window.WebSocket.CLOSED = 3;
+          window.WebSocket.prototype = OrigWebSocket.prototype;
+        }
+
+        const isViteMessage = (arg) => {
+          if (!arg) return false;
+          if (arg === '[vite]' || (typeof arg === 'string' && arg.trim() === '[vite]')) return true;
+          if (typeof arg === 'string') {
+            const lower = arg.toLowerCase();
+            if (
+              arg.includes('[vite]') ||
+              lower.includes('[vite]') ||
+              lower.includes('vite-hmr') ||
+              lower.includes('failed to connect to websocket') ||
+              lower.includes('websocket closed without opened') ||
+              lower.includes('websocket connection to')
+            ) {
+              return true;
+            }
+          }
+          const str = (arg && (arg.message || arg.stack || arg.reason || (arg.reason && arg.reason.message) || (typeof arg.toString === 'function' && arg.toString()))) || '';
+          if (typeof str === 'string') {
+            const lower = str.toLowerCase();
+            if (
+              str.includes('[vite]') ||
+              lower.includes('[vite]') ||
+              lower.includes('vite-hmr') ||
+              lower.includes('failed to connect to websocket') ||
+              lower.includes('websocket closed without opened') ||
+              lower.includes('websocket connection to')
+            ) {
+              return true;
+            }
+          }
+          return false;
+        };
+
+        ['log', 'info', 'warn', 'error', 'debug', 'trace', 'table', 'dir'].forEach(function(method) {
+          const orig = console[method];
+          if (typeof orig === 'function') {
+            console[method] = function(...args) {
+              if (args.some(isViteMessage)) return;
+              orig.apply(console, args);
+            };
+          }
+        });
+
+        const prevOnError = window.onerror;
+        window.onerror = function(msg, src, line, col, err) {
+          if (isViteMessage(msg) || isViteMessage(err)) {
+            return true;
+          }
+          if (typeof prevOnError === 'function') {
+            return prevOnError.apply(this, arguments);
+          }
+          return false;
+        };
+
+        const prevUnhandled = window.onunhandledrejection;
+        window.onunhandledrejection = function(event) {
+          if (event && (isViteMessage(event.reason) || isViteMessage(event.reason && event.reason.message))) {
+            event.preventDefault();
+            return true;
+          }
+          if (typeof prevUnhandled === 'function') {
+            return prevUnhandled.apply(this, arguments);
+          }
+        };
+
+        window.addEventListener('error', function(event) {
+          if (event && (isViteMessage(event.message) || isViteMessage(event.error))) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function(event) {
+          if (event && (isViteMessage(event.reason) || isViteMessage(event.reason && event.reason.message))) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+          }
+        }, true);
+      })();
+      window.__deferredPrompt = null;
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        window.__deferredPrompt = e;
+        window.dispatchEvent(new CustomEvent('pwa-prompt-ready'));
+      });
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes" />
+    <title>КриптоКотики Вана Гога</title>
+    <meta name="description" content="Интерактивная P2P-галерея шедевров и AI-генератор криптокотиков в живописном стиле Винсента Вана Гога" />
+    <meta property="og:title" content="КриптоКотики Вана Гога" />
+    <meta property="og:description" content="Интерактивная P2P-галерея шедевров и AI-генератор криптокотиков в живописном стиле Винсента Вана Гога" />
+    <meta name="theme-color" content="#172554" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="КриптоКотики Вана Гога" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="КриптоКотики" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <script>
+      (function() {
+        const isVite = function(a) {
+          if (!a) return false;
+          if (a === '[vite]' || (typeof a === 'string' && a.trim() === '[vite]')) return true;
+          const s = typeof a === 'string' ? a : (a && (a.message || a.stack || a.reason || ''));
+          if (typeof s === 'string') {
+            const l = s.toLowerCase();
+            return l.includes('[vite]') || l.includes('vite-hmr') || l.includes('failed to connect to websocket') || l.includes('websocket');
+          }
+          return false;
+        };
+        const prevErr = console.error;
+        if (typeof prevErr === 'function') {
+          console.error = function(...args) {
+            if (args.some(isVite)) return;
+            return prevErr.apply(console, args);
+          };
+        }
+      })();
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
