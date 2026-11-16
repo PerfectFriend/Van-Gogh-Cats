@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Navbar } from './components/Navbar';
-import { MasterpieceViewer } from './components/MasterpieceViewer';
-import { ArtStudioGenerator } from './components/ArtStudioGenerator';
+import { X, Crown } from 'lucide-react';
+import { ArtStudioGenerator, StudioGenerateParams } from './components/ArtStudioGenerator';
 import { ImageEditorModal } from './components/ImageEditorModal';
-import { GalleryGrid } from './components/GalleryGrid';
 import { BrushstrokeZoomModal } from './components/BrushstrokeZoomModal';
 import { AndroidInstallModal } from './components/AndroidInstallModal';
 import { AndroidInstallBanner } from './components/AndroidInstallBanner';
@@ -17,43 +15,53 @@ import { MuseumPostcardModal } from './components/MuseumPostcardModal';
 import { ArtworkGuestbookModal } from './components/ArtworkGuestbookModal';
 import { DeletePublicationModal } from './components/DeletePublicationModal';
 import { RasterThemeBackground } from './components/theming/RasterThemeBackground';
-import { StyleThemeSelectorBar } from './components/theming/StyleThemeSelectorBar';
 import { SplashScreen } from './components/SplashScreen';
 import { SystemPermissionsModal } from './components/SystemPermissionsModal';
 import { OnboardingModal } from './components/OnboardingModal';
-import { ProfileManagementView } from './components/ProfileManagementView';
 import { SystemPlatformsView } from './components/SystemPlatformsView';
+import { InstagramNav } from './components/instagram/InstagramNav';
+import { StoriesStrip } from './components/instagram/StoriesStrip';
+import { InstagramStoryModal } from './components/instagram/InstagramStoryModal';
+import { InstagramFeedPost } from './components/instagram/InstagramFeedPost';
+import { InstagramExploreView } from './components/instagram/InstagramExploreView';
+import { InstagramProfileView } from './components/instagram/InstagramProfileView';
+import { ArtworkActionSheet } from './components/instagram/ArtworkActionSheet';
+import { ThemeDrawerModal } from './components/instagram/ThemeDrawerModal';
 import { INITIAL_MASTERPIECES } from './data/masterpieces';
+import { GOURMET_CAT_SPONSORS } from './data/catSponsors';
 import { Artwork, AspectRatioType, ArtistProfile, CatProfile, MainAppTab, StoredUserProfile } from './types';
-import { getOrCreateArtistProfile, validateCatSanctity } from './utils/p2pCrypto';
+import { validateCatSanctity } from './utils/p2pCrypto';
 import {
   saveLocalArtwork,
   getLocalArtworks,
   getFriendBackupArtworks,
   purgeCondemnedArtworkFromStorage,
   deleteArtworkFromStorage,
-  cleanseCorruptedVectorArtworks
+  cleanseCorruptedVectorArtworks,
 } from './utils/p2pStorage';
 import {
   getAllProfiles,
   getActiveProfile,
   hasCompletedPermissionsSetup,
-  setActiveProfileId,
 } from './utils/profileManager';
 import { filePeerComplaint } from './utils/p2pDispute';
 import { p2pNetwork } from './utils/p2pNetwork';
+import { museumAudio } from './utils/museumAudio';
 import { useTranslation } from './context/LanguageContext';
+import { useFirebaseAuth } from './context/FirebaseAuthContext';
 
 export default function App() {
   const { t, setLanguage } = useTranslation();
+  const { googleUser, cloudArtworks, saveArtworkToCloud, deleteArtworkFromCloud } = useFirebaseAuth();
   const [artworks, setArtworks] = useState<Artwork[]>(INITIAL_MASTERPIECES);
   const [activeArtworkId, setActiveArtworkId] = useState<string>(INITIAL_MASTERPIECES[0].id);
-  const [activeModel, setActiveModel] = useState<string>('gemini-3.1-flash-lite-image');
+  const [activeModel, setActiveModel] = useState<string>('gemini-nano-banana-2.1');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [generationProgress, setGenerationProgress] = useState<{ current: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [complaintNotice, setComplaintNotice] = useState<string | null>(null);
 
-  // Tab State: replacing endless scroll with organized functional tabs
+  // Instagram Primary Navigation Tab
   const [activeTab, setActiveTab] = useState<MainAppTab>('gallery');
 
   // Splash & Onboarding Life Cycle
@@ -63,21 +71,33 @@ export default function App() {
 
   // Multi-Profile and Artist State
   const [profilesList, setProfilesList] = useState<StoredUserProfile[]>(() => getAllProfiles());
-  const [artistProfile, setArtistProfile] = useState<ArtistProfile>(() => {
+  const [artistProfile, setArtistProfile] = useState<StoredUserProfile>(() => {
     const existing = getActiveProfile();
     if (existing) return existing;
     return {
       id: 'local_painter',
       name: 'Винсент Рыжехвостый',
       avatarColor: 'from-amber-500 to-yellow-600',
-      bio: 'Художник децентрализованной мастерской',
+      bio: 'Художник децентрализованной мастерской кошачьего постимпрессионизма',
       createdAt: Date.now(),
       totalCreations: 0,
       likedArtworkIds: [],
     };
   });
 
-  // Modals state
+  // Instagram Interaction States
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  const [audioOpenArtworkId, setAudioOpenArtworkId] = useState<string | null>(null);
+  const [contextMenuArtwork, setContextMenuArtwork] = useState<Artwork | null>(null);
+  const [selectedPostModalArtwork, setSelectedPostModalArtwork] = useState<Artwork | null>(null);
+  const [storyViewerState, setStoryViewerState] = useState<{
+    isOpen: boolean;
+    artwork: Artwork | null;
+    themeId?: string;
+  }>({ isOpen: false, artwork: null });
+  const [isThemeDrawerOpen, setIsThemeDrawerOpen] = useState<boolean>(false);
+
+  // Secondary Modals state (triggered via Context Menu / Long-press / Profile Menu)
   const [zoomArtwork, setZoomArtwork] = useState<Artwork | null>(null);
   const [editorArtwork, setEditorArtwork] = useState<Artwork | null>(null);
   const [isAndroidModalOpen, setIsAndroidModalOpen] = useState<boolean>(false);
@@ -92,7 +112,6 @@ export default function App() {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [activeCat, setActiveCat] = useState<CatProfile | null>(null);
   const [externalStudioPrompt, setExternalStudioPrompt] = useState<string>('');
-  const [inspectedCount, setInspectedCount] = useState<number>(1);
   const [isPro, setIsPro] = useState<boolean>(() => {
     try {
       return localStorage.getItem('vangogh_cat_pro_status') === 'true';
@@ -116,36 +135,20 @@ export default function App() {
   };
 
   const isCleanArtwork = (art: Artwork) =>
+    Boolean(art.imageUrl) &&
     !art.imageUrl?.startsWith('data:image/svg+xml') &&
-    !art.imageUrl?.includes('<svg') &&
-    !art.id?.startsWith('vg_edit_');
+    !art.imageUrl?.includes('<svg');
 
-  const activeArtwork =
-    artworks.find(a => a.id === activeArtworkId && isCleanArtwork(a)) ||
-    artworks.find(a => isCleanArtwork(a)) ||
-    INITIAL_MASTERPIECES[0];
-  const activeArtworkIndex = artworks.findIndex(a => a.id === activeArtwork.id);
-
-  const handleNavigatePrev = () => {
-    if (artworks.length <= 1) return;
-    const currentIdx = activeArtworkIndex >= 0 ? activeArtworkIndex : 0;
-    const prevIndex = (currentIdx - 1 + artworks.length) % artworks.length;
-    setActiveArtworkId(artworks[prevIndex].id);
-    setInspectedCount(c => c + 1);
-  };
-
-  const handleNavigateNext = () => {
-    if (artworks.length <= 1) return;
-    const currentIdx = activeArtworkIndex >= 0 ? activeArtworkIndex : 0;
-    const nextIndex = (currentIdx + 1) % artworks.length;
-    setActiveArtworkId(artworks[nextIndex].id);
-    setInspectedCount(c => c + 1);
-  };
+  const canDeleteArtwork = (art: Artwork) =>
+    Boolean(
+      art.isUserCreated ||
+        art.source === 'my-local' ||
+        (artistProfile && art.authorId === artistProfile.id)
+    );
 
   // Lifecycle Step 1: Splash screen completion handler
   const handleSplashComplete = () => {
     setShowSplash(false);
-    // Check if system permissions were already requested
     const permsDone = hasCompletedPermissionsSetup();
     if (!permsDone) {
       setShowPermissionsModal(true);
@@ -160,7 +163,6 @@ export default function App() {
     checkProfilesAfterStartup();
   };
 
-  // Check if onboarding is needed
   const checkProfilesAfterStartup = () => {
     const list = getAllProfiles();
     setProfilesList(list);
@@ -180,16 +182,16 @@ export default function App() {
     const updated = getAllProfiles();
     setProfilesList(updated);
     initP2PForProfile(profile);
-    setActionNotice(`Добро пожаловать в галерею, мастер ${profile.name}!`);
-    setTimeout(() => setActionNotice(null), 5000);
+    setActionNotice(`Добро пожаловать, ${profile.name}!`);
+    setTimeout(() => setActionNotice(null), 4000);
   };
 
   const initP2PForProfile = (profile: ArtistProfile) => {
     p2pNetwork.init(
       profile,
       (incomingArt) => {
-        setArtworks(prev => {
-          if (prev.some(a => a.id === incomingArt.id)) return prev;
+        setArtworks((prev) => {
+          if (prev.some((a) => a.id === incomingArt.id)) return prev;
           return [incomingArt, ...prev];
         });
       },
@@ -197,215 +199,244 @@ export default function App() {
         console.log('WebRTC P2P friend connected:', friend.name);
       },
       (artId) => {
-        setArtworks(prev => prev.map(a => a.id === artId ? { ...a, likes: (a.likes || 0) + 1 } : a));
+        setArtworks((prev) =>
+          prev.map((a) => (a.id === artId ? { ...a, likes: (a.likes || 0) + 1 } : a))
+        );
       },
       artworks.length
     );
   };
 
-  // Initialize P2P Artist Profile and load local + friend backups from IndexedDB
   useEffect(() => {
-    // Cleanse any corrupted vector/SVG graphics from previous remix attempts and load safe creations
-    cleanseCorruptedVectorArtworks().then((purged) => {
-      if (purged.length > 0) {
-        console.log('Cleaned corrupted vector artifacts from storage:', purged);
-      }
-      Promise.all([getLocalArtworks(), getFriendBackupArtworks()]).then(([localCreations, friendBackups]) => {
-        const cleanLocal = localCreations.filter(isCleanArtwork);
-        const cleanFriends = friendBackups.filter(isCleanArtwork);
+    cleanseCorruptedVectorArtworks().then(() => {
+      Promise.all([getLocalArtworks(), getFriendBackupArtworks()]).then(
+        ([localCreations, friendBackups]) => {
+          const cleanLocal = localCreations.filter(isCleanArtwork);
+          const cleanFriends = friendBackups.filter(isCleanArtwork);
 
-        if (cleanLocal.length > 0 || cleanFriends.length > 0) {
-          setArtworks(prev => {
-            const combined = [...cleanLocal, ...cleanFriends, ...prev.filter(isCleanArtwork)];
-            const seen = new Set<string>();
-            return combined.filter(item => {
-              if (seen.has(item.id)) return false;
-              seen.add(item.id);
-              return true;
+          if (cleanLocal.length > 0 || cleanFriends.length > 0) {
+            setArtworks((prev) => {
+              const combined = [...cleanLocal, ...cleanFriends, ...prev.filter(isCleanArtwork)];
+              const seen = new Set<string>();
+              return combined.filter((item) => {
+                if (seen.has(item.id)) return false;
+                seen.add(item.id);
+                return true;
+              });
             });
-          });
+          }
         }
-      });
+      );
     });
 
-    // Also fetch server-side shared gallery artworks
     fetch('/api/artworks')
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => res.json())
+      .then((data) => {
         if (data.artworks && Array.isArray(data.artworks) && data.artworks.length > 0) {
           const cleanServerArt = data.artworks.filter(isCleanArtwork);
-          setArtworks(prev => {
+          setArtworks((prev) => {
             const existingIds = new Set(cleanServerArt.map((a: Artwork) => a.id));
-            const remaining = prev.filter(a => isCleanArtwork(a) && !existingIds.has(a.id));
+            const remaining = prev.filter((a) => isCleanArtwork(a) && !existingIds.has(a.id));
             return [...cleanServerArt, ...remaining];
           });
         }
       })
-      .catch(err => {
+      .catch((err) => {
         console.warn('Using local initial masterpieces:', err);
       });
+    // Merge cloud artworks synced from signed-in Google account
+    // Handled in dedicated effect below
   }, []);
 
-  const handleGenerateImage = async (
-    prompt: string,
-    model: string,
-    aspectRatio: AspectRatioType,
-    stylePresetId: string
-  ) => {
-    // 1. Enforce strict P2P rule: "Запрещено всё кроме котов"
-    const validation = validateCatSanctity(prompt);
-    if (!validation.isCat) {
-      setError(validation.reason || t.catSanctityError);
-      return;
+  useEffect(() => {
+    if (!cloudArtworks || cloudArtworks.length === 0) return;
+    setArtworks((prev) => {
+      const existingIds = new Set(prev.map((a) => a.id));
+      const newCloud = cloudArtworks.filter((c) => isCleanArtwork(c) && !existingIds.has(c.id));
+      if (newCloud.length === 0) return prev;
+      return [...newCloud, ...prev];
+    });
+  }, [cloudArtworks]);
+
+  const handleGenerateImage = async (params: StudioGenerateParams) => {
+    if (params.referenceImages.length === 0) {
+      const validation = validateCatSanctity(params.prompt);
+      if (!validation.isCat) {
+        setError(validation.reason || t.catSanctityError);
+        return;
+      }
     }
 
     setIsGenerating(true);
     setError(null);
+    const total = params.batchCount || 1;
+    const batchAngles = [
+      '',
+      ' Вариация композиции #2: иной ракурс и выразительное освещение.',
+      ' Вариация композиции #3: крупный план и акцент на деталях и фактуре.',
+    ];
+
+    const createdArtworks: Artwork[] = [];
+    const authorId = googleUser ? `google_${googleUser.uid.slice(0, 16)}` : artistProfile.id;
+    const authorName = googleUser?.displayName || artistProfile.name;
 
     try {
-      const response = await fetch('/api/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          model,
-          aspectRatio,
-          stylePresetId
-        })
-      });
+      for (let i = 0; i < total; i++) {
+        setGenerationProgress({ current: i + 1, total });
+        const stepPrompt = `${params.prompt}${batchAngles[i] || ''}`.trim();
 
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.message || data.error || t.errorGenerate);
-      }
+        const response = await fetch('/api/generate-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: stepPrompt,
+            model: params.model,
+            aspectRatio: params.aspectRatio,
+            imageSize: params.imageSize,
+            stylePresetId: params.stylePresetId,
+            customStylePrompt: params.customStylePrompt,
+            referenceImages: params.referenceImages.map((img) => ({
+              dataUrl: img.dataUrl,
+              mimeType: img.mimeType,
+            })),
+          }),
+        });
 
-      if (data.artwork) {
+        const data = await response.json();
+        if (!response.ok || !data.success || !data.artwork) {
+          throw new Error(data.message || data.error || t.errorGenerate);
+        }
+
         const enrichedArtwork: Artwork = {
           ...data.artwork,
-          authorId: artistProfile.id,
-          authorName: artistProfile.name,
+          authorId,
+          authorName,
           source: 'my-local',
           isBackedUpLocally: true,
         };
 
-        setArtworks(prev => [enrichedArtwork, ...prev]);
+        createdArtworks.push(enrichedArtwork);
+        setArtworks((prev) => [enrichedArtwork, ...prev]);
         setActiveArtworkId(enrichedArtwork.id);
         saveLocalArtwork(enrichedArtwork);
-      } else if (data.isCuratedFallback) {
-        const presetToArtId: Record<string, string> = {
-          starry_night: 'vg_two_cats_starry',
-          cafe_terrace: 'vg_two_cats_cafe',
-          sunflowers: 'vg_two_cats_sunflowers',
-          almond_blossom: 'vg_two_cats_almond',
-          bedroom_arles: 'vg_two_cats_bedroom',
-          wheatfield: 'vg_two_cats_wheatfield',
-          irises: 'vg_two_cats_irises',
-          red_vineyard: 'vg_two_cats_vineyard',
-          olive_trees: 'vg_two_cats_olives',
-          rhone_night: 'vg_two_cats_rhone',
-        };
-
-        const targetId = presetToArtId[stylePresetId] || 'vg_two_cats_starry';
-        const baseMasterpiece = INITIAL_MASTERPIECES.find(a => a.id === targetId) || INITIAL_MASTERPIECES[0];
-
-        const customArt: Artwork = {
-          ...baseMasterpiece,
-          id: `vg_exhibition_${Date.now()}`,
-          title: data.suggestedTitle || baseMasterpiece.title,
-          prompt: prompt,
-          description: data.curatorNote || baseMasterpiece.description,
-          isUserCreated: true,
-          authorId: artistProfile.id,
-          authorName: artistProfile.name,
-          source: 'my-local',
-          isBackedUpLocally: true,
-          createdAt: Date.now()
-        };
-
-        setArtworks(prev => [customArt, ...prev]);
-        setActiveArtworkId(customArt.id);
-        saveLocalArtwork(customArt);
-
-        if (data.quotaNotice) {
-          setActionNotice(data.quotaNotice);
-          setTimeout(() => setActionNotice(null), 6500);
+        if (googleUser) {
+          saveArtworkToCloud(enrichedArtwork, params.customStylePrompt ? 'custom' : params.stylePresetId).catch(
+            (cloudErr) => console.warn('Cloud sync warning:', cloudErr)
+          );
         }
       }
-    } catch (err: unknown) {
-      console.info('Using authentic curated oil painting from collection:', (err as Error)?.message);
-      const fallbackArt = INITIAL_MASTERPIECES[0];
-      setActiveArtworkId(fallbackArt.id);
-      setActionNotice('Экспозиция шедевра открыта в выбранном стиле.');
-      setTimeout(() => setActionNotice(null), 6000);
+
+      if (createdArtworks.length > 0) {
+        setActionNotice(
+          createdArtworks.length > 1
+            ? `Создана серия из ${createdArtworks.length} картин в вашем стиле!`
+            : `Полотно «${createdArtworks[0].title}» готово!`
+        );
+        setTimeout(() => setActionNotice(null), 4500);
+        setActiveTab('gallery');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    } catch (err: any) {
+      setError(err?.message || t.errorGenerate);
     } finally {
       setIsGenerating(false);
+      setGenerationProgress(null);
     }
   };
 
   const handleImageEdited = (newArtwork: Artwork) => {
+    const authorId = googleUser ? `google_${googleUser.uid.slice(0, 16)}` : artistProfile.id;
+    const authorName = googleUser?.displayName || artistProfile.name;
     const enrichedArtwork: Artwork = {
       ...newArtwork,
-      authorId: artistProfile.id,
-      authorName: artistProfile.name,
+      authorId,
+      authorName,
       source: 'my-local',
       isBackedUpLocally: true,
     };
-    setArtworks(prev => [enrichedArtwork, ...prev]);
+    setArtworks((prev) => [enrichedArtwork, ...prev]);
     setActiveArtworkId(enrichedArtwork.id);
     saveLocalArtwork(enrichedArtwork);
+    if (googleUser) {
+      saveArtworkToCloud(enrichedArtwork, 'restoration').catch((e) => console.warn('Cloud sync warning:', e));
+    }
+    setActiveTab('gallery');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleLike = (id: string) => {
-    setArtworks(prev =>
-      prev.map(art => {
+    const alreadyLiked = likedIds.has(id);
+    setLikedIds((prev) => {
+      const next = new Set(prev);
+      if (alreadyLiked) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setArtworks((prev) =>
+      prev.map((art) => {
         if (art.id === id) {
-          return { ...art, likes: (art.likes || 10) + 1 };
+          const delta = alreadyLiked ? -1 : 1;
+          return { ...art, likes: Math.max(0, (art.likes || 12) + delta) };
         }
         return art;
       })
     );
   };
 
+  const handleToggleAudioForArtwork = (art: Artwork) => {
+    if (audioOpenArtworkId === art.id) {
+      museumAudio.stopSpeech();
+      setAudioOpenArtworkId(null);
+    } else {
+      setAudioOpenArtworkId(art.id);
+      const narrationText = `${art.title}. Стиль: ${art.style}. ${art.description}. Особенность мазка: ${art.brushstrokeNote}`;
+      museumAudio.playNeuralNarration(narrationText, art.id);
+    }
+  };
+
   const handleSelectRandomCurated = () => {
-    const curated = artworks.filter(a => !a.isUserCreated);
+    const curated = artworks.filter((a) => !a.isUserCreated);
     const options = curated.length > 0 ? curated : artworks;
     const randomIndex = Math.floor(Math.random() * options.length);
-    setActiveArtworkId(options[randomIndex].id);
+    const picked = options[randomIndex];
+    setActiveArtworkId(picked.id);
+    setSelectedPostModalArtwork(picked);
     setError(null);
   };
 
   const handlePurgeCondemnedArtwork = async (artworkId: string) => {
     await purgeCondemnedArtworkFromStorage(artworkId);
-    setArtworks(prev => prev.filter(a => a.id !== artworkId));
+    setArtworks((prev) => prev.filter((a) => a.id !== artworkId));
     if (activeArtworkId === artworkId) {
-      const fallback = artworks.find(a => a.id !== artworkId && isCleanArtwork(a)) || INITIAL_MASTERPIECES[0];
+      const fallback =
+        artworks.find((a) => a.id !== artworkId && isCleanArtwork(a)) || INITIAL_MASTERPIECES[0];
       setActiveArtworkId(fallback.id);
     }
   };
 
   const handleConfirmDelete = async (artworkId: string) => {
     try {
-      const artToDelete = artworks.find(a => a.id === artworkId);
+      const artToDelete = artworks.find((a) => a.id === artworkId);
       await deleteArtworkFromStorage(artworkId);
-
+      if (googleUser) {
+        deleteArtworkFromCloud(artworkId).catch(() => {});
+      }
       try {
         await fetch(`/api/artwork/${artworkId}`, { method: 'DELETE' });
-      } catch (e) {
-        console.warn('Backend delete notification error:', e);
+      } catch {}
+
+      setArtworks((prev) => prev.filter((a) => a.id !== artworkId));
+      if (selectedPostModalArtwork?.id === artworkId) {
+        setSelectedPostModalArtwork(null);
       }
-
-      setArtworks(prev => prev.filter(a => a.id !== artworkId));
-
       if (activeArtworkId === artworkId) {
-        const remaining = artworks.filter(a => a.id !== artworkId && isCleanArtwork(a));
-        const fallback = remaining[0] || INITIAL_MASTERPIECES[0];
-        setActiveArtworkId(fallback.id);
+        const remaining = artworks.filter((a) => a.id !== artworkId && isCleanArtwork(a));
+        setActiveArtworkId((remaining[0] || INITIAL_MASTERPIECES[0]).id);
       }
 
-      setActionNotice(`Публикация «${artToDelete?.title || 'Картина'}» успешно удалена автором.`);
-      setTimeout(() => setActionNotice(null), 5000);
-    } catch (err: unknown) {
-      console.error('Delete publication error:', err);
+      setActionNotice(`Публикация «${artToDelete?.title || 'Картина'}» удалена.`);
+      setTimeout(() => setActionNotice(null), 4000);
+    } catch {
       setError('Не удалось удалить публикацию. Попробуйте снова.');
     }
   };
@@ -414,12 +445,15 @@ export default function App() {
     filePeerComplaint(artwork, artistProfile, reason);
     setActiveTab('network');
     setComplaintNotice(`${t.complaintAlertSuccess}: «${artwork.title}»`);
-    setTimeout(() => setComplaintNotice(null), 6000);
+    setTimeout(() => setComplaintNotice(null), 5000);
   };
 
+  // Order feed so if user picked an active artwork it's highlighted cleanly, otherwise chronological
+  const feedArtworks = artworks.filter(isCleanArtwork);
+
   return (
-    <div className="min-h-screen text-slate-100 font-sans selection:bg-cyan-400 selection:text-slate-950 relative overflow-x-hidden">
-      {/* 1. Splash Screen at initial launch */}
+    <div className="min-h-screen text-slate-100 font-sans selection:bg-amber-400 selection:text-slate-950 relative overflow-x-hidden">
+      {/* 1. Splash Screen */}
       {showSplash && (
         <SplashScreen
           onComplete={handleSplashComplete}
@@ -427,94 +461,138 @@ export default function App() {
         />
       )}
 
-      {/* Authentic High-Resolution Raster Museum Art Background & Canvas Textures */}
+      {/* Subtle Instagram Dark Mode Theme Backdrop */}
       <RasterThemeBackground />
 
-      {/* Complaint Notice Toast */}
-      {complaintNotice && (
-        <div className="fixed top-20 right-4 z-50 p-4 rounded-2xl bg-[#0d122e]/95 border-2 border-cyan-400/70 text-cyan-200 text-xs shadow-2xl max-w-sm animate-fade-in flex items-center justify-between gap-3 backdrop-blur-md">
-          <span className="font-medium">{complaintNotice}</span>
-          <button onClick={() => setComplaintNotice(null)} className="text-slate-400 hover:text-white cursor-pointer font-bold">✕</button>
+      {/* Notices */}
+      {(complaintNotice || actionNotice) && (
+        <div className="fixed top-14 md:top-4 right-4 z-50 px-4 py-3 rounded-2xl bg-[#121629]/95 border border-white/15 text-slate-100 text-xs shadow-2xl max-w-xs flex items-center justify-between gap-3 backdrop-blur-xl">
+          <span>{complaintNotice || actionNotice}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setComplaintNotice(null);
+              setActionNotice(null);
+            }}
+            className="text-slate-400 hover:text-white cursor-pointer"
+          >
+            ✕
+          </button>
         </div>
       )}
 
-      {/* Author Publication Deletion Notice Toast */}
-      {actionNotice && (
-        <div className="fixed top-20 right-4 z-50 p-4 rounded-2xl bg-[#1a0814]/95 border-2 border-rose-500/80 text-rose-200 text-xs shadow-2xl max-w-sm animate-fade-in flex items-center justify-between gap-3 backdrop-blur-md">
-          <span className="font-medium">{actionNotice}</span>
-          <button onClick={() => setActionNotice(null)} className="text-rose-400 hover:text-rose-100 cursor-pointer font-bold">✕</button>
-        </div>
-      )}
-
-      {/* Top Navbar with Functional Tabs Navigation */}
-      <Navbar
-        artworksCount={artworks.length}
-        activeModel={activeModel}
+      {/* Instagram Navigation: Desktop Left Rail + Mobile Top/Bottom Bars */}
+      <InstagramNav
         activeTab={activeTab}
         onSelectTab={(tab) => {
           setActiveTab(tab);
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
-        onOpenAndroidModal={() => setIsAndroidModalOpen(true)}
-        onOpenUbuntuModal={() => setIsUbuntuModalOpen(true)}
+        activeProfile={artistProfile}
+        onProfileChanged={(updated) => {
+          setArtistProfile(updated);
+          setProfilesList(getAllProfiles());
+          initP2PForProfile(updated);
+        }}
+        onOpenThemeDrawer={() => setIsThemeDrawerOpen(true)}
         onOpenCatPassport={() => setIsCatPassportOpen(true)}
+        onOpenUbuntuModal={() => setIsUbuntuModalOpen(true)}
+        onOpenAndroidModal={() => setIsAndroidModalOpen(true)}
         onOpenProModal={() => setIsProModalOpen(true)}
+        onSelectRandomCurated={handleSelectRandomCurated}
+        onOpenOnboardingModal={() => setShowOnboardingModal(true)}
         isPro={isPro}
-        profilesCount={profilesList.length}
-        activeProfileName={artistProfile.name}
       />
 
-      {/* Main Content Area Structured By Tabs */}
-      <main className="relative z-10">
-        {/* TAB 1: 🖼️ Masterpiece Gallery & Exhibition */}
+      {/* Main Content Area offset by Instagram Desktop Left Sidebar & Mobile Bottom Bar */}
+      <main className="relative z-10 md:pl-[72px] xl:pl-[228px] pb-20 md:pb-10 min-h-screen">
+        {/* TAB 1: HOME FEED (Stories + Vertical Photo Feed) */}
         {activeTab === 'gallery' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-8 animate-in fade-in duration-300">
-            {/* Hero Section: Active Van Gogh Cat Masterpiece */}
-            <MasterpieceViewer
-              artwork={activeArtwork}
-              onOpenZoom={(art) => setZoomArtwork(art)}
-              onOpenEditor={(art) => setEditorArtwork(art)}
-              onLike={handleLike}
-              onReportDispute={(art) => setComplaintArtwork(art)}
-              onDeletePublication={(art) => setDeletingArtwork(art)}
-              canDelete={Boolean(activeArtwork.isUserCreated || activeArtwork.source === 'my-local' || (artistProfile && activeArtwork.authorId === artistProfile.id))}
-              isPro={isPro}
-              onOpenProModal={() => setIsProModalOpen(true)}
-              onOpenFramingModal={(art) => setFramingArtwork(art)}
-              onOpenPostcard={(art) => setPostcardArtwork(art)}
-              onOpenGuestbook={(art) => setGuestbookArtwork(art)}
-              onNavigatePrev={artworks.length > 1 ? handleNavigatePrev : undefined}
-              onNavigateNext={artworks.length > 1 ? handleNavigateNext : undefined}
-              artworkIndex={activeArtworkIndex >= 0 ? activeArtworkIndex : 0}
-              totalArtworks={artworks.length}
-              inspectedCount={inspectedCount}
+          <div className="max-w-[560px] mx-auto pt-2 sm:pt-6 space-y-5">
+            <StoriesStrip
+              artistProfile={artistProfile}
+              artworks={feedArtworks}
+              onOpenStory={(art, themeId) =>
+                setStoryViewerState({ isOpen: true, artwork: art, themeId })
+              }
+              onOpenStudio={() => setActiveTab('studio')}
+              onOpenCatPassport={() => setIsCatPassportOpen(true)}
+              onOpenThemeDrawer={() => setIsThemeDrawerOpen(true)}
             />
 
-            {/* Exhibition Gallery Grid */}
-            <GalleryGrid
-              artworks={artworks}
-              activeArtworkId={activeArtworkId}
-              onSelectArtwork={(item) => {
-                setActiveArtworkId(item.id);
-                setInspectedCount(c => c + 1);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              onLike={handleLike}
-              onDeletePublication={(art) => setDeletingArtwork(art)}
-              currentUserId={artistProfile.id}
-              isPro={isPro}
-              onOpenProModal={() => setIsProModalOpen(true)}
-            />
+            <div className="space-y-4 sm:space-y-6">
+              {feedArtworks.map((art, index) => {
+                const showSponsorAfter = !isPro && (index + 1) % 10 === 0;
+                const sponsor =
+                  GOURMET_CAT_SPONSORS[Math.floor(index / 10) % GOURMET_CAT_SPONSORS.length] ||
+                  GOURMET_CAT_SPONSORS[0];
+
+                return (
+                  <React.Fragment key={art.id}>
+                    <InstagramFeedPost
+                      artwork={art}
+                      isLiked={likedIds.has(art.id)}
+                      onLike={handleLike}
+                      onOpenContextMenu={(a) => setContextMenuArtwork(a)}
+                      onOpenZoom={(a) => setZoomArtwork(a)}
+                      onOpenGuestbook={(a) => setGuestbookArtwork(a)}
+                      onOpenPostcard={(a) => setPostcardArtwork(a)}
+                      onOpenFramingModal={(a) => setFramingArtwork(a)}
+                      isAudioOpen={audioOpenArtworkId === art.id}
+                      onToggleAudio={handleToggleAudioForArtwork}
+                    />
+
+                    {/* Subtle Instagram-style Sponsored Post (1 in 10 unless PRO) */}
+                    {showSponsorAfter && (
+                      <div className="bg-[#090c1a]/85 sm:border sm:border-white/10 sm:rounded-2xl p-4 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <img
+                            src={sponsor.imageUrl}
+                            alt={sponsor.brandName}
+                            className="w-12 h-12 rounded-xl object-cover shrink-0"
+                          />
+                          <div className="min-w-0">
+                            <p className="text-[11px] text-slate-400">Реклама · Партнёр галереи</p>
+                            <p className="text-sm font-semibold text-white truncate">
+                              {sponsor.brandName}
+                            </p>
+                            <p className="text-xs text-slate-300 truncate">{sponsor.slogan}</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsProModalOpen(true)}
+                          className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-medium text-amber-300 flex items-center gap-1.5 shrink-0 cursor-pointer"
+                        >
+                          <Crown className="w-3.5 h-3.5" />
+                          <span>Убрать</span>
+                        </button>
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </div>
           </div>
         )}
 
-        {/* TAB 2: 🎨 AI Art Studio */}
+        {/* TAB 2: EXPLORE GRID */}
+        {activeTab === 'explore' && (
+          <InstagramExploreView
+            artworks={feedArtworks}
+            activeArtworkId={activeArtworkId}
+            onSelectArtwork={(art) => setSelectedPostModalArtwork(art)}
+            onOpenContextMenu={(art) => setContextMenuArtwork(art)}
+          />
+        )}
+
+        {/* TAB 3: CREATE STUDIO */}
         {activeTab === 'studio' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-8 animate-in fade-in duration-300">
-            {/* AI Studio: Text Prompt Image Generation */}
+          <div className="py-4 sm:py-6">
             <ArtStudioGenerator
               onGenerate={handleGenerateImage}
               isGenerating={isGenerating}
+              generationProgress={generationProgress}
               error={error}
               onClearError={() => setError(null)}
               onSelectRandomCurated={handleSelectRandomCurated}
@@ -523,31 +601,27 @@ export default function App() {
               isBannedReadOnly={artistProfile.isBannedReadOnly}
               externalPrompt={externalStudioPrompt}
               activeCat={activeCat}
+              onOpenCatPassport={() => setIsCatPassportOpen(true)}
             />
-
-            {/* Style Themes & Art Direction Selector Bar */}
-            <StyleThemeSelectorBar />
           </div>
         )}
 
-        {/* TAB 3: 🤝 P2P Network, Dual-Host LAN & Swarm Storage */}
+        {/* TAB 4: DIRECT P2P NETWORK */}
         {activeTab === 'network' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 animate-in fade-in duration-300">
+          <div className="max-w-5xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
             <P2PNetworkHub
               artistProfile={artistProfile}
               myArtworks={artworks}
               onProfileUpdate={(updated) => setArtistProfile(updated)}
               onAddArtworksFromPeer={(newArts) => {
-                setArtworks(prev => {
-                  const existing = new Set(prev.map(a => a.id));
-                  const filtered = newArts.filter(a => !existing.has(a.id));
+                setArtworks((prev) => {
+                  const existing = new Set(prev.map((a) => a.id));
+                  const filtered = newArts.filter((a) => !existing.has(a.id));
                   return [...filtered, ...prev];
                 });
               }}
               onSelectArtwork={(artwork) => {
-                setActiveArtworkId(artwork.id);
-                setActiveTab('gallery');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                setSelectedPostModalArtwork(artwork);
               }}
               onLikeArtwork={handleLike}
               onPurgeCondemnedArtwork={handlePurgeCondemnedArtwork}
@@ -555,27 +629,30 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 4: 👤 Multi-Profile Manager & BIP-39 Vault */}
+        {/* TAB 5: INSTAGRAM PROFILE (with BIP-39 Vault & System inside Drawer/Subtabs) */}
         {activeTab === 'profiles' && (
-          <ProfileManagementView
-            currentProfile={{
-              ...artistProfile,
-              seedPhrase: (artistProfile as StoredUserProfile).seedPhrase,
-              pinHash: (artistProfile as StoredUserProfile).pinHash,
-              pinSalt: (artistProfile as StoredUserProfile).pinSalt,
-              hasBip39Wallet: (artistProfile as StoredUserProfile).hasBip39Wallet,
-            }}
+          <InstagramProfileView
+            currentProfile={artistProfile}
             artworks={artworks}
+            isPro={isPro}
             onProfileChanged={(updatedProfile) => {
               setArtistProfile(updatedProfile);
               setProfilesList(getAllProfiles());
               initP2PForProfile(updatedProfile);
             }}
+            onSelectArtwork={(art) => setSelectedPostModalArtwork(art)}
+            onOpenContextMenu={(art) => setContextMenuArtwork(art)}
             onOpenCatPassport={() => setIsCatPassportOpen(true)}
+            onOpenUbuntuModal={() => setIsUbuntuModalOpen(true)}
+            onOpenAndroidModal={() => setIsAndroidModalOpen(true)}
+            onOpenProModal={() => setIsProModalOpen(true)}
+            onOpenThemeDrawer={() => setIsThemeDrawerOpen(true)}
+            onOpenCreateStudio={() => setActiveTab('studio')}
+            onOpenOnboardingModal={() => setShowOnboardingModal(true)}
           />
         )}
 
-        {/* TAB 5: 🐧 System, Platforms & Permissions */}
+        {/* TAB 6: SYSTEM VIEW (accessible via Menu -> System) */}
         {activeTab === 'system' && (
           <SystemPlatformsView
             onOpenUbuntuModal={() => setIsUbuntuModalOpen(true)}
@@ -587,19 +664,79 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="mt-16 border-t border-indigo-900/60 bg-[#070a24]/90 backdrop-blur-md py-8 text-center text-xs text-cyan-200/70 relative z-10">
-        <div className="max-w-7xl mx-auto px-4 space-y-2 font-gaudi">
-          <p className="text-sm text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-yellow-300 to-cyan-300">
-            «{t.footerQuote}»
-          </p>
-          <p className="font-cyber text-[11px] text-cyan-300/60">
-            {t.footerMadeFor} {activeModel} • BIP-39 Cryptographic Vault & Ubuntu RC1 Engine
-          </p>
+      {/* Single-Post Modal Lightbox when clicking a tile in Explore or Profile */}
+      {selectedPostModalArtwork && (
+        <div
+          className="fixed inset-0 z-40 bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto"
+          onClick={() => setSelectedPostModalArtwork(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-[540px] relative my-auto"
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedPostModalArtwork(null)}
+              className="absolute -top-11 right-0 min-w-[40px] min-h-[40px] rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer z-10"
+              aria-label="Закрыть просмотр"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <InstagramFeedPost
+              artwork={selectedPostModalArtwork}
+              isLiked={likedIds.has(selectedPostModalArtwork.id)}
+              onLike={handleLike}
+              onOpenContextMenu={(a) => setContextMenuArtwork(a)}
+              onOpenZoom={(a) => setZoomArtwork(a)}
+              onOpenGuestbook={(a) => setGuestbookArtwork(a)}
+              onOpenPostcard={(a) => setPostcardArtwork(a)}
+              onOpenFramingModal={(a) => setFramingArtwork(a)}
+              isAudioOpen={audioOpenArtworkId === selectedPostModalArtwork.id}
+              onToggleAudio={handleToggleAudioForArtwork}
+            />
+          </div>
         </div>
-      </footer>
+      )}
 
-      {/* Modals & Dialogs */}
+      {/* Long-Press & "⋯" Artwork Context Menu Sheet */}
+      <ArtworkActionSheet
+        artwork={contextMenuArtwork}
+        isOpen={!!contextMenuArtwork}
+        onClose={() => setContextMenuArtwork(null)}
+        onOpenZoom={(art) => setZoomArtwork(art)}
+        onOpenEditor={(art) => setEditorArtwork(art)}
+        onOpenFramingModal={(art) => setFramingArtwork(art)}
+        onOpenPostcard={(art) => setPostcardArtwork(art)}
+        onOpenGuestbook={(art) => setGuestbookArtwork(art)}
+        onOpenAudioGuide={(art) => {
+          setAudioOpenArtworkId(art.id);
+          const narrationText = `${art.title}. Стиль: ${art.style}. ${art.description}. Особенность мазка: ${art.brushstrokeNote}`;
+          museumAudio.playNeuralNarration(narrationText, art.id);
+        }}
+        onReportDispute={(art) => setComplaintArtwork(art)}
+        onDeletePublication={(art) => setDeletingArtwork(art)}
+        canDelete={contextMenuArtwork ? canDeleteArtwork(contextMenuArtwork) : false}
+      />
+
+      {/* Fullscreen Story Viewer Modal */}
+      <InstagramStoryModal
+        isOpen={storyViewerState.isOpen}
+        initialArtwork={storyViewerState.artwork}
+        initialThemeId={storyViewerState.themeId}
+        artworks={feedArtworks}
+        onClose={() => setStoryViewerState({ isOpen: false, artwork: null })}
+        onOpenZoom={(art) => setZoomArtwork(art)}
+        onLike={handleLike}
+        onOpenInStudio={() => setActiveTab('studio')}
+      />
+
+      {/* Themes & Language Sheet */}
+      <ThemeDrawerModal
+        isOpen={isThemeDrawerOpen}
+        onClose={() => setIsThemeDrawerOpen(false)}
+      />
+
+      {/* Onboarding & System Modals */}
       <SystemPermissionsModal
         isOpen={showPermissionsModal}
         onComplete={handlePermissionsComplete}
@@ -684,7 +821,7 @@ export default function App() {
       />
 
       <AndroidInstallBanner onOpenModal={() => setIsAndroidModalOpen(true)} />
-      
+
       <AndroidInstallModal
         isOpen={isAndroidModalOpen}
         onClose={() => setIsAndroidModalOpen(false)}

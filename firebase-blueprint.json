@@ -1,0 +1,213 @@
+{
+  "entities": {
+    "UserPublicProfile": {
+      "title": "UserPublicProfile",
+      "description": "Public artist gallery identity linked to Google Sign-In",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "preferredStyleId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "customStylePrompt": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "bio": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "createdAt", "updatedAt"]
+    },
+    "UserPrivateAccount": {
+      "title": "UserPrivateAccount",
+      "description": "Private PII account document isolated from public profile",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "UserCatProfile": {
+      "title": "UserCatProfile",
+      "description": "Personal cat passport metadata saved by authenticated user",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "breed": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "coatPattern": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "eyeColor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "distinctiveMarks": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerUid", "name", "breed", "coatPattern", "eyeColor", "createdAt", "updatedAt"]
+    },
+    "UserArtworkMeta": {
+      "title": "UserArtworkMeta",
+      "description": "Personal AI-generated cat painting metadata and compressed preview in user cloud gallery",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "style": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "stylePresetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "aspectRatio": {
+          "type": "string",
+          "enum": ["1:1", "4:3", "3:4", "16:9", "9:16", "4:1", "1:4"]
+        },
+        "modelUsed": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "imagePreviewUrl": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 500000
+        },
+        "likes": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerUid", "title", "style", "stylePresetId", "prompt", "aspectRatio", "modelUsed", "imagePreviewUrl", "likes", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublicProfile" },
+      "description": "Public artist gallery profile for each Google-authenticated user"
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateAccount" },
+      "description": "Isolated private PII account metadata accessible only by the owner"
+    },
+    "/users/{userId}/cats/{catId}": {
+      "schema": { "$ref": "#/entities/UserCatProfile" },
+      "description": "Personal cat profiles owned by the user"
+    },
+    "/users/{userId}/artworks/{artworkId}": {
+      "schema": { "$ref": "#/entities/UserArtworkMeta" },
+      "description": "Personal AI-generated cat paintings gallery belonging to the user"
+    }
+  }
+}

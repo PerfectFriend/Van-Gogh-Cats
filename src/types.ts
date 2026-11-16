@@ -1,4 +1,13 @@
-export type AspectRatioType = '1:1' | '16:9' | '4:3' | '3:4' | '9:16';
+export type AspectRatioType = '1:1' | '16:9' | '4:3' | '3:4' | '9:16' | '4:1' | '1:4';
+
+export type ImageSizeType = '1K' | '2K' | '4K';
+
+export interface ReferenceCatPhoto {
+  id: string;
+  dataUrl: string;
+  mimeType: string;
+  name?: string;
+}
 
 export interface ColorSwatch {
   hex: string;
@@ -99,8 +108,10 @@ export interface GenerateImageRequest {
   prompt: string;
   model?: string;
   aspectRatio?: AspectRatioType;
+  imageSize?: ImageSizeType;
   stylePresetId?: string;
   customStyleNote?: string;
+  referenceImages?: { dataUrl: string; mimeType?: string }[];
 }
 
 export interface EditImageRequest {
@@ -108,6 +119,7 @@ export interface EditImageRequest {
   mimeType: string;
   prompt: string;
   model?: string;
+  imageSize?: ImageSizeType;
 }
 
 export interface GenerationResponse {
@@ -122,7 +134,7 @@ export interface GenerationResponse {
 
 export type ViewMode = 'gallery' | 'studio' | 'editor' | 'canvas' | 'p2p-network';
 
-export type MainAppTab = 'gallery' | 'studio' | 'network' | 'profiles' | 'system';
+export type MainAppTab = 'gallery' | 'explore' | 'studio' | 'network' | 'profiles' | 'system';
 
 // P2P Artist Identity & Friendship
 export interface ArtistProfile {

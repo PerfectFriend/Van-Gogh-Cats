@@ -52,6 +52,16 @@ async function startServer() {
     res.json({ status: 'ok', artworksCount: sessionArtworks.length });
   });
 
+  // API Route: AI engine status (never exposes key value)
+  app.get('/api/ai-status', (req, res) => {
+    res.json({
+      success: true,
+      hasServerKey: Boolean(process.env.GEMINI_API_KEY),
+      defaultModel: 'gemini-nano-banana-2.1',
+      supportedModels: ['gemini-nano-banana-2.1', 'gemini-3.1-flash-lite-image', 'gemini-3-pro-image'],
+    });
+  });
+
   // API Route: Get gallery masterpieces (filtering out any corrupted vector/SVG graphics)
   app.get('/api/gallery', (req, res) => {
     sessionArtworks = sessionArtworks.filter(a =>
@@ -121,7 +131,7 @@ async function startServer() {
           const prebuiltVoiceName = geminiVoiceMap[voice] || 'Charon';
 
           const response = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-tts-preview',
+            model: 'gemini-3.8-flash-lite-tts',
             contents: cleanText,
             config: {
               responseModalities: ['AUDIO'],
@@ -189,295 +199,305 @@ async function startServer() {
     }
   });
 
-  // API Route: Generate new Van Gogh cat image via text prompt
+  // Helper: Normalize image model to valid official Nano Banana models
+  function normalizeImageModel(rawModel?: string): 'gemini-nano-banana-2.1' | 'gemini-3.1-flash-lite-image' | 'gemini-3-pro-image' {
+    if (rawModel === 'gemini-3.1-flash-lite-image') return 'gemini-3.1-flash-lite-image';
+    if (rawModel === 'gemini-3-pro-image') return 'gemini-3-pro-image';
+    return 'gemini-nano-banana-2.1';
+  }
+
+  // Helper: Map Gemini SDK errors cleanly to client-facing HTTP status and Russian guidance
+  function formatGeminiImageError(err: any) {
+    const rawMsg = err?.message || String(err || 'Gemini API error');
+    const statusNum = Number(err?.status || err?.code || 0);
+    const isMissingKey = rawMsg.includes('GEMINI_API_KEY');
+    const isQuotaOrBilling =
+      statusNum === 429 ||
+      statusNum === 402 ||
+      statusNum === 403 ||
+      /quota|billing|RESOURCE_EXHAUSTED|PERMISSION_DENIED|billed|paid/i.test(rawMsg);
+    const isInvalidKey = statusNum === 400 && /API_KEY_INVALID|API key not valid/i.test(rawMsg);
+
+    if (isMissingKey) {
+      return {
+        httpStatus: 400,
+        errorCode: 'GEMINI_KEY_MISSING',
+        billingRequired: true,
+        message: 'Не подключён серверный ключ Gemini (Settings > Secrets). Подключите свой биллинг-проект или ключ в настройках AI Studio.',
+      };
+    }
+    if (isInvalidKey) {
+      return {
+        httpStatus: 400,
+        errorCode: 'GEMINI_KEY_INVALID',
+        billingRequired: true,
+        message: 'Серверный ключ Gemini отклонён как недействительный. Проверьте ключ в Settings > Secrets.',
+      };
+    }
+    if (isQuotaOrBilling) {
+      return {
+        httpStatus: statusNum === 429 ? 429 : 403,
+        errorCode: 'GEMINI_BILLING_OR_QUOTA',
+        billingRequired: true,
+        message: `Nano Banana 2 требует активный биллинг Google Cloud / квоту на ключе Gemini (${rawMsg.slice(0, 140)}).`,
+      };
+    }
+    return {
+      httpStatus: statusNum >= 400 && statusNum < 600 ? statusNum : 500,
+      errorCode: 'GEMINI_GENERATION_FAILED',
+      billingRequired: false,
+      message: rawMsg.slice(0, 260),
+    };
+  }
+
+  // API Route: Generate new Van Gogh / custom-style cat image via Nano Banana 2 (supports multi-photo reference upload)
   app.post('/api/generate-image', async (req, res) => {
     const {
       prompt = 'Нарисуй котика в стиле Вана Гога',
-      model = 'gemini-3.1-flash-lite-image',
+      model = 'gemini-nano-banana-2.1',
       aspectRatio = '1:1',
-      stylePresetId = 'starry_night'
+      imageSize = '1K',
+      stylePresetId = 'starry_night',
+      customStylePrompt = '',
+      referenceImages = [],
     } = req.body;
 
-    const requestedModel = (model === 'gemini-3.1-flash-image-preview' || !model)
-      ? 'gemini-3.1-flash-lite-image'
-      : model;
+    const requestedModel = normalizeImageModel(model);
+    const stylePreset = VAN_GOGH_STYLE_PRESETS.find((p) => p.id === stylePresetId) || VAN_GOGH_STYLE_PRESETS[0];
+    const hasCustomStyle = typeof customStylePrompt === 'string' && customStylePrompt.trim().length > 0;
+    const styleDirective = hasCustomStyle
+      ? `in this exact custom artistic style described by the user: "${customStylePrompt.trim()}". Maintain expressive painterly mastery and cohesive palette across the entire artwork.`
+      : `${stylePreset.promptModifier}. Ensure authentic post-impressionist brushstroke texture, vibrant colors, and expressive emotional mood.`;
 
-    // Find style preset modifier
-    const stylePreset = VAN_GOGH_STYLE_PRESETS.find(p => p.id === stylePresetId) || VAN_GOGH_STYLE_PRESETS[0];
+    const validRefs = Array.isArray(referenceImages)
+      ? referenceImages
+          .filter((img: any) => img && typeof img.dataUrl === 'string' && img.dataUrl.includes('base64,'))
+          .slice(0, 4)
+      : [];
 
-    // Build enriched prompt for authentic Van Gogh masterpiece style
-    const enrichedPrompt = `${prompt}. ${stylePreset.promptModifier}. Ensure artistic post-impressionist brushstroke texture, vibrant colors, and expressive emotional mood.`;
+    const refInstruction =
+      validRefs.length > 0
+        ? `Using the ${validRefs.length} reference photo(s) of the user's real cat(s), faithfully preserve each cat's exact fur colors, markings, face shape, ear shape, and eye color while transforming the scene into a fine-art painting. `
+        : '';
 
-    let generatedImage: string | null = null;
-    let textNote = '';
-    let usedEngine = requestedModel;
-    let fallbackNotice: string | null = null;
+    const enrichedPrompt = `${refInstruction}${prompt}. ${styleDirective}`;
 
-    // Step 1: Attempt direct image model generation (active when project has paid quota/billing)
+    const parts: any[] = [];
+    for (const ref of validRefs) {
+      const match = ref.dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+      const mimeType = ref.mimeType || match?.[1] || 'image/jpeg';
+      const data = match?.[2] || ref.dataUrl.replace(/^data:image\/\w+;base64,/, '');
+      if (data) {
+        parts.push({
+          inlineData: {
+            data,
+            mimeType,
+          },
+        });
+      }
+    }
+    parts.push({ text: enrichedPrompt });
+
+    const supportsExtendedConfig =
+      requestedModel === 'gemini-nano-banana-2.1' || requestedModel === 'gemini-3-pro-image';
+    const allowedRatios = supportsExtendedConfig
+      ? ['1:1', '3:4', '4:3', '9:16', '16:9', '1:4', '4:1']
+      : ['1:1', '3:4', '4:3', '9:16', '16:9'];
+    const safeRatio = allowedRatios.includes(aspectRatio) ? aspectRatio : '1:1';
+    const safeSize = imageSize === '2K' || imageSize === '4K' ? imageSize : '1K';
+
+    const imageConfig: Record<string, string> = {
+      aspectRatio: safeRatio,
+    };
+    if (supportsExtendedConfig) {
+      imageConfig.imageSize = safeSize;
+    }
+
     try {
       const ai = getAI();
       const response = await ai.models.generateContent({
         model: requestedModel,
-        contents: {
-          parts: [{ text: enrichedPrompt }]
-        },
+        contents: { parts },
         config: {
-          imageConfig: {
-            aspectRatio: aspectRatio as any,
-            imageSize: '1K'
-          }
-        }
+          imageConfig,
+        },
       });
 
-      const parts = response.candidates?.[0]?.content?.parts || [];
-      for (const part of parts) {
-        if (part.inlineData && part.inlineData.data) {
-          generatedImage = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
+      let generatedImage: string | null = null;
+      let textNote = '';
+      const outParts = response.candidates?.[0]?.content?.parts ?? [];
+      for (const part of outParts) {
+        if (part.inlineData?.data) {
+          const mime = part.inlineData.mimeType ?? 'image/png';
+          generatedImage = `data:${mime};base64,${part.inlineData.data}`;
         } else if (part.text) {
           textNote += part.text + ' ';
         }
       }
-    } catch (modelErr: any) {
-      // In Google AI Studio free tier, image models (gemini-3.1-flash-lite-image) have quota limit 0
-      // Log clean informational message without raw error dump to avoid alarming the system
-      console.info(`[Image Studio] Direct image model generation requires project billing (${modelErr?.status || 'quota 0 on free tier'}). Seamlessly engaging museum oil collection.`);
-    }
 
-    // Step 2: Open generative neural art engine (Flux / SDXL Post-Impressionism) with zero-quota
-    if (!generatedImage) {
-      try {
-        console.info(`[Image Studio] Generating authentic post-impressionist artwork via neural art engine...`);
-        const artPrompt = encodeURIComponent(
-          `Masterpiece oil painting by Vincent van Gogh, ${prompt}, ${stylePreset.promptModifier}, thick impasto brushstrokes, rich canvas texture, vibrant post-impressionist colors, expressive oil fine art`
-        );
-        const seed = Math.floor(Math.random() * 10000000);
-
-        let width = 1024;
-        let height = 1024;
-        if (aspectRatio === '16:9') { width = 1024; height = 576; }
-        else if (aspectRatio === '9:16') { width = 576; height = 1024; }
-        else if (aspectRatio === '4:3') { width = 1024; height = 768; }
-        else if (aspectRatio === '3:4') { width = 768; height = 1024; }
-
-        const openArtUrl = `https://image.pollinations.ai/prompt/${artPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=flux`;
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 14000);
-
-        const openRes = await fetch(openArtUrl, {
-          signal: controller.signal,
-          headers: { 'User-Agent': 'VanGoghCryptoCats/1.0 (Ubuntu-RC)' }
+      if (!generatedImage) {
+        return res.status(502).json({
+          success: false,
+          errorCode: 'NO_IMAGE_PART',
+          billingRequired: false,
+          message: textNote.trim() || `Модель ${requestedModel} не вернула изображение. Попробуйте уточнить описание.`,
         });
-        clearTimeout(timeout);
-
-        if (openRes.ok) {
-          const imgBuffer = Buffer.from(await openRes.arrayBuffer());
-          if (imgBuffer.length > 5000) {
-            generatedImage = `data:image/jpeg;base64,${imgBuffer.toString('base64')}`;
-            usedEngine = 'neural-flux-post-impressionism';
-            console.info(`[Image Studio] Successfully generated new masterpiece (${imgBuffer.length} bytes)!`);
-          }
-        }
-      } catch (openErr: any) {
-        console.warn(`[Image Studio Open Engine Warning]:`, openErr?.message);
       }
-    }
 
-    // Step 3: Offline museum fallback if network is completely disconnected
-    if (!generatedImage) {
-      let dynamicTitle = prompt.length > 40 ? prompt.slice(0, 37) + '...' : prompt;
-      let dynamicDesc = '';
+      const displayStyleName = hasCustomStyle
+        ? `Свой стиль: ${customStylePrompt.trim().slice(0, 40)}`
+        : stylePreset.name;
 
-      // Generate authentic Russian curator analysis using gemini-3.8-flash (active on free tier)
-      try {
-        const ai = getAI();
-        const curatorPrompt = `Напиши одно короткое поэтичное название (до 6 слов) и вдохновляющий комментарий (2 предложения) на русском языке для полотна кота в масляном стиле Винсента ван Гога: "${prompt}", стилистика: "${stylePreset.name}". Формат строго:
-Название: <название>
-Описание: <описание>`;
+      const newArtwork: Artwork = {
+        id: `vg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        title: prompt.length > 40 ? prompt.slice(0, 37) + '...' : prompt,
+        titleEn: 'Nano Banana 2 Cat Creation',
+        imageUrl: generatedImage,
+        prompt,
+        style: displayStyleName,
+        year: `${requestedModel}, ${new Date().getFullYear()}`,
+        description:
+          textNote.trim() ||
+          `Создано моделью ${requestedModel}${validRefs.length > 0 ? ` по ${validRefs.length} фото вашего котика` : ''} (${displayStyleName}).`,
+        palette: stylePreset.colors.map((hex, i) => ({ hex, name: `Оттенок #${i + 1}` })),
+        brushstrokeNote: hasCustomStyle
+          ? `Авторский стиль (${requestedModel}, ${safeSize}).`
+          : `Экспрессивный импасто (${requestedModel}, ${safeSize}).`,
+        aspectRatio: safeRatio as any,
+        createdAt: Date.now(),
+        isUserCreated: true,
+        modelUsed: requestedModel,
+        likes: 1,
+      };
 
-        const textRes = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: curatorPrompt
-        });
-
-        const generatedText = textRes?.text || '';
-        const titleMatch = generatedText.match(/Название:\s*([^\n\r]+)/i);
-        const descMatch = generatedText.match(/Описание:\s*([\s\S]+)/i);
-        if (titleMatch?.[1]) {
-          dynamicTitle = titleMatch[1].trim();
-        }
-        if (descMatch?.[1]) {
-          dynamicDesc = descMatch[1].trim();
-        }
-      } catch {
-        // Silently use defaults if offline
-      }
+      sessionArtworks.unshift(newArtwork);
 
       return res.json({
         success: true,
-        isCuratedFallback: true,
-        stylePresetId,
-        suggestedTitle: dynamicTitle,
-        curatorNote: dynamicDesc,
+        artwork: newArtwork,
         promptUsed: enrichedPrompt,
         modelUsed: requestedModel,
-        quotaNotice: 'Автономный режим (Offline): Для вас подобрано подлинное масляное полотно из музейного фонда.'
+      });
+    } catch (modelErr: any) {
+      const formatted = formatGeminiImageError(modelErr);
+      console.warn(`[Image Studio ${requestedModel} Error]:`, formatted.errorCode, modelErr?.message || '');
+      return res.status(formatted.httpStatus).json({
+        success: false,
+        error: formatted.errorCode,
+        errorCode: formatted.errorCode,
+        billingRequired: formatted.billingRequired,
+        message: formatted.message,
       });
     }
-
-    // Return the directly generated bitmap artwork
-    const newArtwork: Artwork = {
-      id: `vg_${Date.now()}`,
-      title: prompt.length > 40 ? prompt.slice(0, 37) + '...' : prompt,
-      titleEn: 'Custom Van Gogh Cat Creation',
-      imageUrl: generatedImage,
-      prompt: prompt,
-      style: stylePreset.name,
-      year: 'AI Studio, ' + new Date().getFullYear(),
-      description: textNote.trim() || `Уникальное полотно, созданное нейросетью ${usedEngine} в стиле ${stylePreset.name}.`,
-      palette: stylePreset.colors.map((hex, i) => ({ hex, name: `Оттенок #${i + 1}` })),
-      brushstrokeNote: 'Экспрессивный цифровой импасто в манере Винсента ван Гога.',
-      aspectRatio: aspectRatio as any,
-      createdAt: Date.now(),
-      isUserCreated: true,
-      modelUsed: usedEngine,
-      likes: 1
-    };
-
-    sessionArtworks.unshift(newArtwork);
-
-    return res.json({
-      success: true,
-      artwork: newArtwork,
-      promptUsed: enrichedPrompt,
-      modelUsed: usedEngine
-    });
   });
 
-  // API Route: Edit existing image via text prompt
+  // API Route: Edit existing image via Nano Banana 2
   app.post('/api/edit-image', async (req, res) => {
     try {
       const {
         imageBase64,
         mimeType = 'image/png',
         prompt,
-        model = 'gemini-3.1-flash-lite-image'
+        model = 'gemini-nano-banana-2.1',
+        imageSize = '1K',
       } = req.body;
 
       if (!imageBase64 || !prompt) {
         return res.status(400).json({
           success: false,
           error: 'MISSING_PARAMS',
-          message: 'Необходимы изображение и текстовая подсказка для редактирования.'
+          message: 'Необходимы изображение и текстовая подсказка для редактирования.',
         });
       }
 
-      const requestedModel = (model === 'gemini-3.1-flash-image-preview' || !model)
-        ? 'gemini-3.1-flash-lite-image'
-        : model;
+      const requestedModel = normalizeImageModel(model);
+      const match = imageBase64.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+      const resolvedMime = match?.[1] || mimeType || 'image/png';
+      const cleanBase64 = match?.[2] || imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
-      // Clean base64 header if present
-      const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      const supportsExtendedConfig =
+        requestedModel === 'gemini-nano-banana-2.1' || requestedModel === 'gemini-3-pro-image';
+      const safeSize = imageSize === '2K' || imageSize === '4K' ? imageSize : '1K';
+
+      const ai = getAI();
+      const response = await ai.models.generateContent({
+        model: requestedModel,
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                data: cleanBase64,
+                mimeType: resolvedMime,
+              },
+            },
+            {
+              text: `Modify and edit this image while preserving the cat's identity and artistic brushstroke quality: ${prompt}.`,
+            },
+          ],
+        },
+        config: {
+          imageConfig: supportsExtendedConfig ? { imageSize: safeSize } : {},
+        },
+      });
 
       let editedImage: string | null = null;
       let textNote = '';
-
-      try {
-        const ai = getAI();
-        const response = await ai.models.generateContent({
-          model: requestedModel,
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  data: cleanBase64,
-                  mimeType: mimeType
-                }
-              },
-              {
-                text: `Modify and edit this image in the unmistakable post-impressionist oil painting style of Vincent van Gogh: ${prompt}. Keep thick impasto visible brushstrokes and vivid colors.`
-              }
-            ]
-          }
-        });
-
-        const parts = response.candidates?.[0]?.content?.parts || [];
-        for (const part of parts) {
-          if (part.inlineData && part.inlineData.data) {
-            editedImage = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
-          } else if (part.text) {
-            textNote += part.text + ' ';
-          }
-        }
-      } catch (err: any) {
-        console.info(`[Image Studio Edit] Direct image edit requires project billing (${err?.status || 'free tier quota 0'}). Original artwork preserved.`);
-      }
-
-      // If direct Gemini edit is unavailable, engage the open neural art engine
-      if (!editedImage) {
-        try {
-          console.info(`[Image Studio Edit] Engaging neural art engine for creative restoration: "${prompt}"...`);
-          const editPrompt = encodeURIComponent(
-            `Restored masterpiece oil painting by Vincent van Gogh, incorporating elements: ${prompt}, thick dynamic impasto strokes, vivid color harmony, fine art museum canvas`
-          );
-          const editSeed = Math.floor(Math.random() * 10000000);
-          const editUrl = `https://image.pollinations.ai/prompt/${editPrompt}?width=1024&height=1024&seed=${editSeed}&nologo=true&model=flux`;
-
-          const editRes = await fetch(editUrl, { headers: { 'User-Agent': 'VanGoghCryptoCats/1.0 (Ubuntu-RC)' } });
-          if (editRes.ok) {
-            const buf = Buffer.from(await editRes.arrayBuffer());
-            if (buf.length > 5000) {
-              editedImage = `data:image/jpeg;base64,${buf.toString('base64')}`;
-              textNote = `Полотно обновлено нейросетью в постимпрессионистской технике: ${prompt}.`;
-            }
-          }
-        } catch (openEditErr: any) {
-          console.warn('[Image Studio Edit Warning]:', openEditErr?.message);
+      const parts = response.candidates?.[0]?.content?.parts ?? [];
+      for (const part of parts) {
+        if (part.inlineData?.data) {
+          editedImage = `data:${part.inlineData.mimeType ?? 'image/png'};base64,${part.inlineData.data}`;
+        } else if (part.text) {
+          textNote += part.text + ' ';
         }
       }
 
       if (!editedImage) {
-        return res.status(422).json({
+        return res.status(502).json({
           success: false,
-          error: 'IMAGE_GENERATION_UNAVAILABLE',
-          message: 'Дорисовка через нейросеть временно недоступна. Оригинальное масляное полотно сохранено без искажений.'
+          errorCode: 'NO_IMAGE_PART',
+          message: textNote.trim() || `Модель ${requestedModel} не вернула отредактированное изображение.`,
         });
       }
 
       const editedArtwork: Artwork = {
         id: `vg_edit_${Date.now()}`,
         title: `Реставрация: ${prompt.slice(0, 28)}`,
-        titleEn: 'Van Gogh Restored Cat Masterpiece',
+        titleEn: 'Nano Banana 2 Restored Cat Masterpiece',
         imageUrl: editedImage,
-        prompt: prompt,
-        style: 'Авторская реставрация Ван Гога',
-        year: 'AI Studio, ' + new Date().getFullYear(),
-        description: textNote.trim() || `Изображение доработано по запросу: «${prompt}».`,
+        prompt,
+        style: `Доработка (${requestedModel})`,
+        year: `${requestedModel}, ${new Date().getFullYear()}`,
+        description: textNote.trim() || `Изображение доработано моделью ${requestedModel}: «${prompt}».`,
         palette: [
           { hex: '#0047AB', name: 'Синий' },
           { hex: '#FFD700', name: 'Золотой' },
           { hex: '#D4AF37', name: 'Охра' },
           { hex: '#1E3A8A', name: 'Кобальт' },
-          { hex: '#F4A460', name: 'Холст' }
+          { hex: '#F4A460', name: 'Холст' },
         ],
-        brushstrokeNote: 'Синтез оригинального холста и новых пастозных штрихов по запросу автора.',
+        brushstrokeNote: `Синтез оригинального холста и новых штрихов (${requestedModel}).`,
         aspectRatio: '1:1',
         createdAt: Date.now(),
         isUserCreated: true,
         modelUsed: requestedModel,
-        likes: 1
+        likes: 1,
       };
 
       sessionArtworks.unshift(editedArtwork);
 
       return res.json({
         success: true,
-        artwork: editedArtwork
+        artwork: editedArtwork,
       });
     } catch (err: any) {
-      console.error('Image edit error:', err);
-      return res.status(500).json({
+      const formatted = formatGeminiImageError(err);
+      console.error('Image edit error:', formatted.errorCode, err?.message || '');
+      return res.status(formatted.httpStatus).json({
         success: false,
-        error: err.message || 'Ошибка обработки изображения'
+        error: formatted.errorCode,
+        errorCode: formatted.errorCode,
+        billingRequired: formatted.billingRequired,
+        message: formatted.message,
       });
     }
   });
@@ -497,7 +517,7 @@ async function startServer() {
         : `Ты — Арльский Мурлыка, пушистый кот-хранитель арльской мастерской Ван Гога. Отвечай с теплом, легким мурчанием ("Мяу!"), комментируй краски, сон на палитре или лозу виноградников. 2 коротких предложения на русском.`;
 
       const aiRes = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: `${systemPrompt}\n\nПисьмо от ${senderName}: "${message}"\n\nТвой ответ:`
       });
       replyText = aiRes?.text?.trim() || '';

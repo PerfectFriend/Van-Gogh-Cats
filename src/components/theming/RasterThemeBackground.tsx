@@ -6,21 +6,21 @@ export const RasterThemeBackground: React.FC = () => {
 
   return (
     <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-      {/* 1. Primary Raster Oil Canvas Wallpaper with smooth cross-fade */}
+      {/* 1. Primary Raster Oil Canvas Wallpaper with subtle presence */}
       <div
         key={activeTheme.id}
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-1000 scale-[1.02] transform-gpu"
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-1000 scale-[1.02] transform-gpu opacity-25"
         style={{
           backgroundImage: `url(${activeTheme.bgImageUrl})`,
-          filter: 'brightness(0.92) contrast(1.05) saturate(1.15)',
+          filter: 'brightness(0.65) contrast(1.05) saturate(1.1)',
         }}
       />
 
-      {/* 2. Deep Museum Wash & Vignette Layer (ensures pristine text legibility) */}
+      {/* 2. Deep Instagram Dark Canvas Wash (ensures clean photo-first contrast) */}
       <div
         className="absolute inset-0 transition-all duration-700"
         style={{
-          background: activeTheme.bgOverlay,
+          background: 'linear-gradient(180deg, rgba(5, 7, 15, 0.88) 0%, rgba(7, 10, 22, 0.92) 60%, rgba(4, 6, 14, 0.96) 100%)',
         }}
       />
 

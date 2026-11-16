@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Key, Lock, Copy, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, RefreshCw, Sparkles, User, LogIn, PlusCircle } from 'lucide-react';
+import { Shield, Key, Lock, Copy, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, RefreshCw, Sparkles, User, LogIn, PlusCircle, Globe } from 'lucide-react';
 import { StoredUserProfile, Artwork } from '../types';
 import { generateBip39Mnemonic, validateBip39Mnemonic } from '../utils/bip39';
 import {
@@ -9,6 +9,7 @@ import {
   verifyProfilePin,
   setActiveProfileId,
 } from '../utils/profileManager';
+import { useFirebaseAuth } from '../context/FirebaseAuthContext';
 import { ProfileLimitModal } from './ProfileLimitModal';
 
 interface OnboardingModalProps {
@@ -60,6 +61,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   // Limit modal state
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [pendingNextMode, setPendingNextMode] = useState<'create' | 'restore'>('create');
+
+  const { googleUser, signInWithGoogle, isSigningIn, authError } = useFirebaseAuth();
 
   useEffect(() => {
     if (isOpen) {
@@ -200,6 +203,34 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     onComplete(profile);
   };
 
+  const handleGoogleSignInAction = async () => {
+    const user = await signInWithGoogle();
+    if (!user) return;
+    const existingList = getAllProfiles();
+    const googleProfileId = `google_${user.uid.slice(0, 16)}`;
+    const matched = existingList.find((p) => p.id === googleProfileId);
+    if (matched) {
+      setActiveProfileId(matched.id);
+      onComplete(matched);
+      return;
+    }
+    const newGoogleProfile: StoredUserProfile = {
+      id: googleProfileId,
+      name: user.displayName || user.email?.split('@')[0] || 'Google Художник',
+      avatarColor: 'from-cyan-400 to-blue-600',
+      bio: `Облачная галерея Google (${user.email || 'Cloud Sync'})`,
+      createdAt: Date.now(),
+      totalCreations: 0,
+      likedArtworkIds: [],
+      isCurrent: true,
+      hasBip39Wallet: false,
+    };
+    if (existingList.length < 3) {
+      saveNewProfile(newGoogleProfile);
+    }
+    onComplete(newGoogleProfile);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-300">
       <div className="max-w-xl w-full bg-[#0a0f2b] border border-amber-500/40 rounded-3xl p-6 sm:p-8 shadow-[0_20px_70px_rgba(0,0,0,0.95)] text-slate-100 space-y-6">
@@ -217,9 +248,31 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 Вход в кошачий профиль
               </h2>
               <p className="text-xs text-cyan-200/70 font-cyber">
-                Выберите существующий профиль на устройстве или создайте новый по протоколу BIP-39
+                Войдите через Google для облачной галереи или используйте локальный BIP-39 профиль
               </p>
             </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleSignInAction}
+              disabled={isSigningIn}
+              className="w-full py-3 px-4 rounded-2xl bg-white hover:bg-slate-100 text-slate-950 font-semibold text-sm flex items-center justify-center gap-2.5 shadow-lg cursor-pointer transition-colors"
+            >
+              <Globe className="w-4 h-4 text-blue-600" />
+              <span>
+                {isSigningIn
+                  ? 'Подключаем Google...'
+                  : googleUser
+                  ? `Продолжить как ${googleUser.displayName || googleUser.email}`
+                  : 'Войти через Google'}
+              </span>
+            </button>
+            {authError && (
+              <p className="text-xs text-rose-400 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>{authError}</span>
+              </p>
+            )}
 
             {/* List of existing profiles */}
             <div className="space-y-2.5">
@@ -354,8 +407,26 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               </div>
             </div>
 
+            <button
+              type="button"
+              onClick={handleGoogleSignInAction}
+              disabled={isSigningIn}
+              className="w-full py-3 px-4 rounded-2xl bg-white hover:bg-slate-100 text-slate-950 font-semibold text-sm flex items-center justify-center gap-2 shadow-lg cursor-pointer transition-colors"
+            >
+              <Globe className="w-4 h-4 text-blue-600" />
+              <span>
+                {isSigningIn ? 'Выполняется вход...' : 'Быстрый вход через Google (Облачная галерея)'}
+              </span>
+            </button>
+            {authError && (
+              <p className="text-xs text-rose-400 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>{authError}</span>
+              </p>
+            )}
+
             <div className="p-3.5 rounded-2xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-200/90 leading-relaxed">
-              ⚠️ <strong>Важно:</strong> Запишите эти 12 слов на бумаге в точном порядке! Они понадобятся для восстановления доступа к вашим картинам и P2P-идентичности. На следующем шаге система проверит, что вы их сохранили.
+              ⚠️ <strong>Важно для BIP-39:</strong> Запишите эти 12 слов на бумаге в точном порядке! Они понадобятся для восстановления доступа к локальным полотнам и P2P-идентичности. На следующем шаге система проверит, что вы их сохранили.
             </div>
 
             {/* 12 Words Grid */}

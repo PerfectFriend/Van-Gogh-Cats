@@ -6,6 +6,7 @@ import './index.css';
 import { registerSW } from 'virtual:pwa-register';
 import { LanguageProvider } from './context/LanguageContext';
 import { ThemeStyleProvider } from './context/ThemeStyleContext';
+import { FirebaseAuthProvider } from './context/FirebaseAuthContext';
 
 // Register Service Worker for PWA Android support and offline caching
 if (typeof window !== 'undefined' && 'serviceWorker' in navigator && import.meta.env.PROD) {
@@ -26,10 +27,12 @@ if (typeof window !== 'undefined' && 'serviceWorker' in navigator && import.meta
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <LanguageProvider>
-      <ThemeStyleProvider>
-        <App />
-      </ThemeStyleProvider>
-    </LanguageProvider>
+    <FirebaseAuthProvider>
+      <LanguageProvider>
+        <ThemeStyleProvider>
+          <App />
+        </ThemeStyleProvider>
+      </LanguageProvider>
+    </FirebaseAuthProvider>
   </StrictMode>,
 );

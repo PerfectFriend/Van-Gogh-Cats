@@ -104,15 +104,21 @@ export const VAN_GOGH_STYLE_PRESETS: StylePreset[] = [
 
 export const MODEL_OPTIONS = [
   {
-    id: 'gemini-3.1-flash-lite-image',
-    name: 'Gemini 3.1 Flash Lite Image',
-    badge: 'Рекомендуемый (Быстрый & Точный)',
-    description: 'Официальная модель Google для генерации художественных образов в стиле Ван Гога'
+    id: 'gemini-nano-banana-2.1',
+    name: 'Nano Banana 2 (2.1)',
+    badge: 'Рекомендуемый · 1K / 2K / 4K',
+    description: 'Флагманская модель Nano Banana 2: передаёт черты ваших котиков с нескольких фото и рисует в 1K/2K/4K'
   },
   {
-    id: 'gemini-3.1-flash-image',
-    name: 'Gemini 3.1 Flash Image',
-    badge: 'HD Качество',
-    description: 'Максимальная детализация мазков импасто и живописных текстур'
+    id: 'gemini-3.1-flash-lite-image',
+    name: 'Nano Banana 2 Lite',
+    badge: 'Быстрая генерация',
+    description: 'Быстрая официальная модель Gemini 3.1 Flash Lite Image для эскизов и серий полотен'
+  },
+  {
+    id: 'gemini-3-pro-image',
+    name: 'Nano Banana Pro',
+    badge: 'Студийный максимум',
+    description: 'Максимальная детализация сложных сцен и живописных мазков в 1K/2K/4K'
   }
 ];
