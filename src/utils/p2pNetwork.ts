@@ -97,6 +97,62 @@ const ChunkDataPayloadSchema = z.object({
   chunkHash: z.string().regex(/^[0-9a-f]{64}$/i),
 });
 
+const StrokePointSchema = z.object({
+  x: z.number().finite().min(-10000).max(20000),
+  y: z.number().finite().min(-10000).max(20000),
+  pressure: z.number().finite().min(0).max(2).optional(),
+});
+
+const CollabCanvasEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('stroke'),
+    payload: z.object({
+      id: z.string().min(1).max(128),
+      peerId: z.string().min(1).max(128),
+      peerName: z.string().min(1).max(100),
+      peerAvatarColor: z.string().max(80).optional().default('from-amber-500 to-yellow-600'),
+      color: z.string().max(32),
+      width: z.number().finite().min(1).max(128),
+      brushStyle: z.enum(['impasto', 'starry_swirl', 'sunflower_dab', 'palette_knife', 'almond_branch']),
+      points: z.array(StrokePointSchema).min(1).max(2000),
+      timestamp: z.number().finite(),
+    }),
+  }),
+  z.object({
+    type: z.literal('cursor'),
+    payload: z.object({
+      peerId: z.string().min(1).max(128),
+      peerName: z.string().min(1).max(100),
+      peerAvatarColor: z.string().max(80).optional().default('from-amber-500 to-yellow-600'),
+      x: z.number().finite().min(-10000).max(20000),
+      y: z.number().finite().min(-10000).max(20000),
+      isDrawing: z.boolean(),
+      activeColor: z.string().max(32),
+      lastActive: z.number().finite(),
+    }),
+  }),
+  z.object({
+    type: z.literal('clear'),
+    payload: z.object({
+      peerId: z.string().min(1).max(128),
+      timestamp: z.number().finite().optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('sync_request'),
+    payload: z.object({
+      requesterId: z.string().min(1).max(128),
+    }),
+  }),
+  z.object({
+    type: z.literal('sync_response'),
+    payload: z.object({
+      targetPeerId: z.string().min(1).max(128),
+      strokes: z.array(z.unknown()).max(500),
+    }),
+  }),
+]);
+
 interface ActiveConnection {
   pc: RTCPeerConnection;
   dc?: RTCDataChannel;
@@ -105,7 +161,7 @@ interface ActiveConnection {
   latencyMs: number;
 }
 
-const RTC_CONFIG: RTCConfiguration = {
+const DEFAULT_RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
@@ -120,6 +176,8 @@ function isSafeImageUri(uri: string): boolean {
 export class P2PNetworkManager {
   private localProfile: ArtistProfile | null = null;
   private sessionToken: string | null = null;
+  private rtcConfig: RTCConfiguration = DEFAULT_RTC_CONFIG;
+  private isRegistering = false;
   private ws: WebSocket | null = null;
   private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private isDestroyed = false;
@@ -153,7 +211,7 @@ export class P2PNetworkManager {
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       this.channel = new BroadcastChannel('vangogh_cats_p2p_channel');
       this.channel.onmessage = (event) => {
-        void this.handleIncomingMessage(event.data);
+        void this.handleIncomingMessage(event.data, undefined, false);
       };
     }
   }
@@ -164,7 +222,22 @@ export class P2PNetworkManager {
       : {};
   }
 
-  private async handleIncomingMessage(rawMessage: unknown, authenticatedPeerId?: string): Promise<void> {
+  private async getFirebaseIdToken(): Promise<string | null> {
+    if (typeof window === 'undefined') return null;
+    try {
+      const { auth } = await import('../firebase');
+      if (!auth.currentUser) return null;
+      return await auth.currentUser.getIdToken();
+    } catch {
+      return null;
+    }
+  }
+
+  private async handleIncomingMessage(
+    rawMessage: unknown,
+    authenticatedPeerId?: string,
+    isLocalSelfEcho = false
+  ): Promise<void> {
     const parsedOuter = P2PMessageOuterSchema.safeParse(rawMessage);
     if (!parsedOuter.success) {
       console.warn('Dropped malformed P2P message:', parsedOuter.error.issues[0]?.message);
@@ -378,6 +451,17 @@ export class P2PNetworkManager {
       return;
     }
 
+    if (message.type === 'COLLAB_CANVAS_EVENT') {
+      const collabCheck = CollabCanvasEventSchema.safeParse(message.payload);
+      if (!collabCheck.success) {
+        console.warn('Rejected invalid COLLAB_CANVAS_EVENT payload:', collabCheck.error.issues[0]?.message);
+        return;
+      }
+      if (!isLocalSelfEcho && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('p2p:collab_event', { detail: collabCheck.data }));
+      }
+    }
+
     for (const listener of this.messageListeners) {
       try {
         listener(message);
@@ -437,7 +521,7 @@ export class P2PNetworkManager {
       }
     }
 
-    void this.handleIncomingMessage(message);
+    void this.handleIncomingMessage(message, undefined, true);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('p2p_network_message', { detail: message }));
     }
@@ -470,39 +554,126 @@ export class P2PNetworkManager {
     this.onLikeReceivedCallback = onLikeReceived;
     this.myArtworksCount = artworksCount;
 
-    await this.registerWithSignalingServer();
-    this.connectWebSocket();
+    const registered = await this.registerWithSignalingServer();
+    if (registered) {
+      this.connectWebSocket();
+    }
     this.startSignalingPolling();
   }
 
-  private async getLocalPublicKeys(): Promise<{ ecdhPublicKeyJwk?: JsonWebKey; ecdsaPublicKeyJwk?: JsonWebKey }> {
+  public async refreshSignalingSession(): Promise<void> {
+    if (!this.localProfile || this.isDestroyed) return;
+    const registered = await this.registerWithSignalingServer();
+    if (registered) {
+      this.connectWebSocket();
+    }
+  }
+
+  public clearSignalingSession(): void {
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
+    if (this.localProfile && this.sessionToken) {
+      fetch('/api/p2p/leave', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getAuthHeaders(),
+        },
+        body: JSON.stringify({}),
+      }).catch(() => {});
+    }
+    this.sessionToken = null;
+    this.discoveredPeers = [];
+    for (const listener of this.discoveredPeersListeners) {
+      listener([]);
+    }
+  }
+
+  private async getLocalCryptoKeys(): Promise<{
+    ecdhPublicKeyJwk?: JsonWebKey;
+    ecdsaPublicKeyJwk?: JsonWebKey;
+    signChallenge?: (challenge: string) => Promise<string>;
+  }> {
     try {
-      const [{ publicKeyJwk: ecdhPublicKeyJwk }, { publicKeyJwk: ecdsaPublicKeyJwk }] = await Promise.all([
+      const [{ publicKeyJwk: ecdhPublicKeyJwk }, ecdsa] = await Promise.all([
         exportMyEcdhPublicJwk(this.localProfile?.id || 'default'),
         getOrCreatePeerEcdsaKeyPair(),
       ]);
-      return { ecdhPublicKeyJwk, ecdsaPublicKeyJwk };
+      return {
+        ecdhPublicKeyJwk,
+        ecdsaPublicKeyJwk: ecdsa.publicKeyJwk,
+        signChallenge: ecdsa.sign,
+      };
     } catch {
       return {};
     }
   }
 
-  private async registerWithSignalingServer(): Promise<void> {
-    if (!this.localProfile) return;
+  private async fetchIceServers(firebaseToken: string): Promise<void> {
     try {
-      const publicKeys = await this.getLocalPublicKeys();
+      const res = await fetch('/api/p2p/ice-servers', {
+        headers: { Authorization: `Bearer ${firebaseToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.iceServers) && data.iceServers.length > 0) {
+          this.rtcConfig = { iceServers: data.iceServers };
+        }
+      }
+    } catch {
+      // Retain default Google STUN fallback
+    }
+  }
+
+  private async registerWithSignalingServer(): Promise<boolean> {
+    if (!this.localProfile || this.isDestroyed || this.isRegistering) return false;
+
+    const firebaseToken = await this.getFirebaseIdToken();
+    if (!firebaseToken) {
+      // User not signed into Google yet; skip live server signaling without 401 noise
+      return false;
+    }
+
+    this.isRegistering = true;
+    try {
+      const [keys, challengeRes] = await Promise.all([
+        this.getLocalCryptoKeys(),
+        fetch('/api/p2p/challenge', {
+          headers: { Authorization: `Bearer ${firebaseToken}` },
+        }),
+        this.fetchIceServers(firebaseToken),
+      ]);
+
+      if (!challengeRes.ok || !keys.ecdsaPublicKeyJwk || !keys.signChallenge) {
+        return false;
+      }
+
+      const challengeData = await challengeRes.json();
+      if (typeof challengeData?.challenge !== 'string') {
+        return false;
+      }
+
+      const challengeSignature = await keys.signChallenge(challengeData.challenge);
+
       const res = await fetch('/api/p2p/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...this.getAuthHeaders(),
+          Authorization: `Bearer ${firebaseToken}`,
         },
         body: JSON.stringify({
           peerId: this.localProfile.id,
           name: this.localProfile.name,
           avatarColor: this.localProfile.avatarColor,
           artworkCount: this.myArtworksCount,
-          ...publicKeys,
+          ecdhPublicKeyJwk: keys.ecdhPublicKeyJwk,
+          ecdsaPublicKeyJwk: keys.ecdsaPublicKeyJwk,
+          challenge: challengeData.challenge,
+          challengeSignature,
         }),
       });
       if (res.ok) {
@@ -513,9 +684,14 @@ export class P2PNetworkManager {
         if (Array.isArray(data.onlinePeers)) {
           this.updateDiscoveredPeers(data.onlinePeers);
         }
+        return true;
       }
+      return false;
     } catch (err) {
       console.warn('Signaling server registration retry in progress:', err);
+      return false;
+    } finally {
+      this.isRegistering = false;
     }
   }
 
@@ -694,7 +870,7 @@ export class P2PNetworkManager {
       ecdsaPublicKeyJwk: targetPeer.ecdsaPublicKeyJwk,
     };
 
-    const pc = new RTCPeerConnection(RTC_CONFIG);
+    const pc = new RTCPeerConnection(this.rtcConfig);
     const dc = pc.createDataChannel('vangogh-p2p', { ordered: true });
 
     const activeConn: ActiveConnection = {
@@ -765,7 +941,7 @@ export class P2PNetworkManager {
       ecdsaPublicKeyJwk: discovered?.ecdsaPublicKeyJwk,
     };
 
-    const pc = new RTCPeerConnection(RTC_CONFIG);
+    const pc = new RTCPeerConnection(this.rtcConfig);
     const activeConn: ActiveConnection = {
       pc,
       friend,
@@ -831,11 +1007,16 @@ export class P2PNetworkManager {
       friend.status = 'online';
 
       if (this.localProfile) {
-        const publicKeys = await this.getLocalPublicKeys();
+        const publicKeys = await this.getLocalCryptoKeys();
         dc.send(JSON.stringify({
           type: 'HANDSHAKE',
           senderProfile: this.localProfile,
-          payload: { ready: true, clientTime: Date.now(), ...publicKeys },
+          payload: {
+            ready: true,
+            clientTime: Date.now(),
+            ecdhPublicKeyJwk: publicKeys.ecdhPublicKeyJwk,
+            ecdsaPublicKeyJwk: publicKeys.ecdsaPublicKeyJwk,
+          },
           timestamp: Date.now(),
         }));
 

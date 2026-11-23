@@ -80,7 +80,7 @@ export function buildEndorsementCanonicalPayload(
   });
 }
 
-// Get or generate persistent Web Crypto ECDSA P-256 key pair (stored in IndexedDB crypto_keys)
+// Get or generate persistent non-extractable Web Crypto ECDSA P-256 key pair (stored in IndexedDB crypto_keys)
 export async function getOrCreatePeerEcdsaKeyPair(): Promise<{
   fingerprint: string;
   publicKeyJwk: JsonWebKey;
@@ -90,7 +90,16 @@ export async function getOrCreatePeerEcdsaKeyPair(): Promise<{
 
   if (!localEcdsaCache) {
     const stored = await getCryptoKeyPair(ECDSA_STORAGE_ID);
-    if (stored && isValidEcdsaJwk(stored.publicKeyJwk) && stored.privateKeyJwk) {
+
+    // 1. Modern non-extractable CryptoKey handles stored in IndexedDB
+    if (stored?.publicKey && stored?.privateKey && isValidEcdsaJwk(stored.publicKeyJwk)) {
+      localEcdsaCache = {
+        keyPair: { publicKey: stored.publicKey, privateKey: stored.privateKey },
+        publicKeyJwk: stored.publicKeyJwk,
+        fingerprint: stored.fingerprint,
+      };
+    } else if (stored && isValidEcdsaJwk(stored.publicKeyJwk) && stored.privateKeyJwk) {
+      // 2. Migrate legacy JWK to non-extractable handle & scrub privateKeyJwk
       try {
         const [publicKey, privateKey] = await Promise.all([
           cryptoObj.subtle.importKey(
@@ -104,10 +113,19 @@ export async function getOrCreatePeerEcdsaKeyPair(): Promise<{
             'jwk',
             stored.privateKeyJwk,
             { name: 'ECDSA', namedCurve: 'P-256' },
-            true,
+            false,
             ['sign']
           ),
         ]);
+        await saveCryptoKeyPair({
+          id: ECDSA_STORAGE_ID,
+          algorithm: 'ECDSA-P256',
+          publicKey,
+          privateKey,
+          publicKeyJwk: stored.publicKeyJwk,
+          fingerprint: stored.fingerprint,
+          createdAt: stored.createdAt || Date.now(),
+        });
         localEcdsaCache = {
           keyPair: { publicKey, privateKey },
           publicKeyJwk: stored.publicKeyJwk,
@@ -122,14 +140,13 @@ export async function getOrCreatePeerEcdsaKeyPair(): Promise<{
   if (!localEcdsaCache) {
     const keyPair = await cryptoObj.subtle.generateKey(
       { name: 'ECDSA', namedCurve: 'P-256' },
-      true,
+      false,
       ['sign', 'verify']
     );
-    const [publicKeyJwk, privateKeyJwk] = await Promise.all([
+    const [publicKeyJwk, exportedSpki] = await Promise.all([
       cryptoObj.subtle.exportKey('jwk', keyPair.publicKey),
-      cryptoObj.subtle.exportKey('jwk', keyPair.privateKey),
+      cryptoObj.subtle.exportKey('spki', keyPair.publicKey),
     ]);
-    const exportedSpki = await cryptoObj.subtle.exportKey('spki', keyPair.publicKey);
     const spkiHex = Array.from(new Uint8Array(exportedSpki))
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
@@ -139,8 +156,9 @@ export async function getOrCreatePeerEcdsaKeyPair(): Promise<{
     await saveCryptoKeyPair({
       id: ECDSA_STORAGE_ID,
       algorithm: 'ECDSA-P256',
+      publicKey: keyPair.publicKey,
+      privateKey: keyPair.privateKey,
       publicKeyJwk,
-      privateKeyJwk,
       fingerprint,
       createdAt: Date.now(),
     });

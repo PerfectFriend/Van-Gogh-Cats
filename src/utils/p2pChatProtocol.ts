@@ -7,11 +7,15 @@ import {
   uint8ToHex,
   hexToUint8,
   generateRandomHex,
+  canonicalizeEcPublicJwk,
   isValidEcP256Jwk,
   getOrCreateLocalEcdhKeyPair,
   exportMyEcdhPublicJwk,
   registerPeerEcdhPublicKey,
   getPeerEcdhPublicKey,
+  getPeerEcdhKeyState,
+  markPeerSafetyNumberVerified,
+  confirmPeerNewEcdhKey,
   computeSafetyNumber,
 } from './p2pEcdhKeys';
 
@@ -20,13 +24,51 @@ export {
   exportMyEcdhPublicJwk,
   registerPeerEcdhPublicKey,
   getPeerEcdhPublicKey,
+  getPeerEcdhKeyState,
+  markPeerSafetyNumberVerified,
+  confirmPeerNewEcdhKey,
   computeSafetyNumber,
 };
 
 const CHAT_HISTORY_STORAGE_KEY = 'vangogh_p2p_chat_history';
 const CUSTODY_VAULT_STORAGE_KEY = 'vangogh_dtn_custody_vault';
 const ENVELOPE_VAULT_STORAGE_KEY = 'vangogh_p2p_envelopes';
+const SEEN_ENVELOPES_STORAGE_KEY = 'vangogh_p2p_seen_envelopes';
 const HKDF_INFO = 'vangogh-whispers-v2';
+const seenEnvelopeIdsMemory = new Set<string>();
+
+export function hasSeenEnvelopeReplay(envelopeId: string): boolean {
+  if (!envelopeId) return true;
+  if (seenEnvelopeIdsMemory.has(envelopeId)) return true;
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(SEEN_ENVELOPES_STORAGE_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw) as string[];
+        if (Array.isArray(arr) && arr.includes(envelopeId)) {
+          seenEnvelopeIdsMemory.add(envelopeId);
+          return true;
+        }
+      }
+    } catch {}
+  }
+  return false;
+}
+
+export function recordSeenEnvelope(envelopeId: string): void {
+  if (!envelopeId) return;
+  seenEnvelopeIdsMemory.add(envelopeId);
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(SEEN_ENVELOPES_STORAGE_KEY);
+      const arr: string[] = raw ? JSON.parse(raw) : [];
+      if (!arr.includes(envelopeId)) {
+        arr.unshift(envelopeId);
+        localStorage.setItem(SEEN_ENVELOPES_STORAGE_KEY, JSON.stringify(arr.slice(0, 500)));
+      }
+    } catch {}
+  }
+}
 
 function getCrypto(): Crypto {
   return getWebCrypto();
@@ -157,13 +199,14 @@ export async function encryptChatPayload(
   };
 }
 
-// Decrypt blind ciphertext using ECDH v2 key agreement + AAD verification (with read-only v1 fallback)
+// Decrypt blind ciphertext using ECDH v2 key agreement + pinned-key priority + AAD verification
 export async function decryptChatPayload(
   envelope: P2PEncryptedEnvelope,
   myPeerId: string,
   options?: {
     localProfileId?: string;
     peerPublicKeyJwk?: JsonWebKey;
+    allowLegacyLocalReadOnly?: boolean;
   }
 ): Promise<any> {
   if (
@@ -181,11 +224,28 @@ export async function decryptChatPayload(
   if (envelope.v === 2) {
     const localKeys = await getOrCreateLocalEcdhKeyPair(options?.localProfileId || myPeerId);
     const isRecipient = myPeerId === envelope.recipientPeerId || envelope.recipientPeerId === 'my-local';
-    const remoteJwk =
-      options?.peerPublicKeyJwk ||
-      (isRecipient
-        ? envelope.senderEcdhPublicKeyJwk || getPeerEcdhPublicKey(envelope.senderPeerId)
-        : getPeerEcdhPublicKey(envelope.recipientPeerId));
+
+    let remoteJwk: JsonWebKey | null = null;
+    if (options?.peerPublicKeyJwk) {
+      remoteJwk = options.peerPublicKeyJwk;
+    } else if (isRecipient) {
+      const pinned = getPeerEcdhPublicKey(envelope.senderPeerId);
+      const claimed = envelope.senderEcdhPublicKeyJwk;
+
+      if (pinned && claimed && canonicalizeEcPublicJwk(pinned) !== canonicalizeEcPublicJwk(claimed)) {
+        // Record conflicting key notice without overwriting the pinned key
+        registerPeerEcdhPublicKey(envelope.senderPeerId, claimed);
+        throw new Error('PEER_KEY_CHANGED: ключ собеседника изменился, сообщение отклонено.');
+      }
+
+      remoteJwk = pinned || claimed || null;
+      if (!pinned && claimed && isValidEcP256Jwk(claimed)) {
+        // First-contact TOFU pinning
+        registerPeerEcdhPublicKey(envelope.senderPeerId, claimed);
+      }
+    } else {
+      remoteJwk = getPeerEcdhPublicKey(envelope.recipientPeerId);
+    }
 
     if (!isValidEcP256Jwk(remoteJwk)) {
       throw new Error('Не найден открытый ECDH ключ собеседника для расшифровки конверта.');
@@ -214,7 +274,11 @@ export async function decryptChatPayload(
     return JSON.parse(jsonStr);
   }
 
-  // Legacy v1 read-only fallback for pre-upgrade envelopes
+  // Legacy v1 PBKDF2 fallback allowed strictly for local archival inspection, NEVER from network peers
+  if (!options?.allowLegacyLocalReadOnly) {
+    throw new Error('LEGACY_V1_REJECTED: старые незащищённые конверты v1 отклоняются при сетевом приёме.');
+  }
+
   const legacyKey = await deriveLegacyV1ChatKey(envelope.senderPeerId, envelope.recipientPeerId, envelope.salt);
   const decryptedBuffer = await cryptoObj.subtle.decrypt(
     {
@@ -652,13 +716,23 @@ if (typeof window !== 'undefined') {
     if (msg.type === 'CHAT_ENVELOPE_DIRECT') {
       const envelope: P2PEncryptedEnvelope = msg.payload;
       if (envelope && (envelope.recipientPeerId === myProfile.id || envelope.recipientPeerId === 'my-local')) {
+        if (envelope.expiresAt && Date.now() > envelope.expiresAt) {
+          console.warn('Dropped expired incoming P2P envelope:', envelope.envelopeId);
+          return;
+        }
+        if (hasSeenEnvelopeReplay(envelope.envelopeId)) {
+          console.warn('Dropped replayed P2P envelopeId:', envelope.envelopeId);
+          return;
+        }
+        if (!envelope.isRelayed && msg.senderProfile?.id && envelope.senderPeerId !== msg.senderProfile.id) {
+          console.warn('Rejected direct envelope with mismatched transport sender identity');
+          return;
+        }
         try {
-          if (envelope.senderEcdhPublicKeyJwk) {
-            registerPeerEcdhPublicKey(envelope.senderPeerId, envelope.senderEcdhPublicKeyJwk);
-          }
           const decrypted = await decryptChatPayload(envelope, myProfile.id, {
             localProfileId: myProfile.id,
           });
+          recordSeenEnvelope(envelope.envelopeId);
 
           const newMsg: P2PChatMessage = {
             id: decrypted.messageId || `msg_${getCrypto().randomUUID()}`,

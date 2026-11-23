@@ -1,6 +1,10 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateCatSanctity } from '../utils/p2pCrypto';
+import {
+  validateCatSanctity,
+  hasExplicitCatMention,
+  hasExplicitDogOnlyMention,
+} from '../utils/catSanctity';
 
 describe('Cat Sanctity Validator ("Запрещено всё кроме котов")', () => {
   test('approves prompts with Russian cat terms', () => {
@@ -9,7 +13,10 @@ describe('Cat Sanctity Validator ("Запрещено всё кроме кото
       'Пушистая кошка спит под звездным небом',
       'Маленький котёнок среди подсолнухов',
       'Кошачий портрет маслом в технике импасто',
-      'Котята ловят звездную пыль'
+      'Котята ловят звездную пыль',
+      'Кот на подсолнухах',
+      'Котёнок спит',
+      'Мурлыка у окна',
     ];
 
     for (const p of validPrompts) {
@@ -30,6 +37,25 @@ describe('Cat Sanctity Validator ("Запрещено всё кроме кото
     for (const p of validPrompts) {
       const res = validateCatSanctity(p);
       assert.equal(res.isCat, true, `Expected "${p}" to be valid cat prompt`);
+    }
+  });
+
+  test('rejects Russian and English substring false-positives without real cats', () => {
+    const trapPrompts = [
+      'Который читает письмо',
+      'Котлета на тарелке',
+      'Котёл с супом',
+      'Мурал на стене',
+      'Кошмар в Арле',
+      'A catalog of paintings in Saint-Rémy',
+      'Scatterplot of brushstrokes',
+      'Которые смотрят на звёзды',
+    ];
+
+    for (const p of trapPrompts) {
+      const res = validateCatSanctity(p);
+      assert.equal(res.isCat, false, `Expected false-positive trap "${p}" to be rejected`);
+      assert.equal(hasExplicitCatMention(p), false);
     }
   });
 
@@ -60,7 +86,9 @@ describe('Cat Sanctity Validator ("Запрещено всё кроме кото
     for (const p of dogPrompts) {
       const res = validateCatSanctity(p);
       assert.equal(res.isCat, false, `Expected dog prompt "${p}" to be rejected`);
+      assert.equal(hasExplicitDogOnlyMention(p), true);
     }
+    assert.equal(hasExplicitDogOnlyMention('Кот и собака на террасе'), false);
   });
 
   test('approves cat even if title contains additional context', () => {
@@ -68,3 +96,4 @@ describe('Cat Sanctity Validator ("Запрещено всё кроме кото
     assert.equal(res.isCat, true);
   });
 });
+

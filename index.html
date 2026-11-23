@@ -12,9 +12,12 @@
         if (typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined') {
           const OrigWebSocket = window.WebSocket;
           window.WebSocket = function(url, protocols) {
-            const isViteHmr = (typeof protocols === 'string' && protocols.includes('vite-hmr')) ||
+            const isAppWs = typeof url === 'string' && url.includes('/ws/p2p');
+            const isViteHmr = !isAppWs && (
+                              (typeof protocols === 'string' && protocols.includes('vite-hmr')) ||
                               (Array.isArray(protocols) && protocols.includes('vite-hmr')) ||
-                              (typeof url === 'string' && (url.includes('token=') || url.includes('24678') || url.includes('vite')));
+                              (typeof url === 'string' && (url.includes('24678') || url.includes('vite')))
+            );
             if (isViteHmr) {
               const target = new EventTarget();
               Object.setPrototypeOf(target, OrigWebSocket.prototype);

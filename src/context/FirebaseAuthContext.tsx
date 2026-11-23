@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import {
   User,
+  getRedirectResult,
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
 } from 'firebase/auth';
 import {
@@ -146,6 +148,21 @@ export const FirebaseAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+    getRedirectResult(auth)
+      .then(async (res) => {
+        if (mounted && res?.user) {
+          await ensureUserDocs(res.user);
+        }
+      })
+      .catch((err: any) => {
+        if (!mounted) return;
+        const code = err?.code || '';
+        if (code && code !== 'auth/no-auth-event') {
+          setAuthError(String(err?.message || 'Ошибка завершения входа через Google.'));
+        }
+      });
+
     const unsub = onAuthStateChanged(auth, async (user) => {
       setGoogleUser(user);
       setIsAuthReady(true);
@@ -161,7 +178,10 @@ export const FirebaseAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
         setCloudPreferredStyleId(null);
       }
     });
-    return () => unsub();
+    return () => {
+      mounted = false;
+      unsub();
+    };
   }, [ensureUserDocs]);
 
   // Attach Firestore snapshot listener ONLY when auth is ready and user is authenticated
@@ -232,10 +252,22 @@ export const FirebaseAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } catch (err: any) {
       const code = err?.code || '';
       const rawMsg = String(err?.message || '');
+      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return null;
+        } catch (redirectErr: any) {
+          setAuthError(
+            String(
+              redirectErr?.message ||
+                'Всплывающее окно заблокировано. Переадресация Google не удалась.'
+            )
+          );
+          return null;
+        }
+      }
       if (code === 'auth/popup-closed-by-user') {
         setAuthError('Окно входа через Google было закрыто до завершения авторизации.');
-      } else if (code === 'auth/popup-blocked') {
-        setAuthError('Браузер заблокировал всплывающее окно Google. Разрешите pop-up и повторите.');
       } else if (rawMsg.startsWith('{')) {
         setAuthError('Аккаунт Google подключён, но синхронизация профиля с облаком требует прав доступа Firestore.');
       } else {

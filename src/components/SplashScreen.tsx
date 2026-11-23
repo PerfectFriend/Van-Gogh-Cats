@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, ShieldCheck, Globe, Wifi, Database, CheckCircle2, Loader2, Brush, ArrowRight, Zap } from 'lucide-react';
-import splashWallpaper from '../assets/images/splash_cyber_gaudi_1790474348858.jpg';
+import splashWallpaper from '../assets/images/splash_cyber_gaudi_1790474348858.webp';
 
 interface SplashScreenProps {
   onComplete: () => void;

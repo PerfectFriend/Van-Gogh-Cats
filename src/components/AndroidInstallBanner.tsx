@@ -32,7 +32,7 @@ export const AndroidInstallBanner: React.FC<AndroidInstallBannerProps> = ({ onOp
   return (
     <aside 
       aria-label={t.androidInstallBtn}
-      className="fixed bottom-3 left-3 right-3 sm:left-auto sm:right-6 sm:max-w-md z-40 animate-bounce-subtle"
+      className="fixed bottom-16 md:bottom-6 left-3 right-3 sm:left-auto sm:right-6 sm:max-w-md z-40 animate-bounce-subtle"
     >
       <div className="relative p-3.5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 border border-amber-500/40 shadow-2xl shadow-black/80 flex items-center gap-3">
         {/* App Icon */}

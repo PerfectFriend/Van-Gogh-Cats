@@ -44,6 +44,7 @@ import { P2PSwarmChunkerView } from './P2PSwarmChunkerView';
 import { P2PWebOfTrustView } from './P2PWebOfTrustView';
 import { P2PStorageQuotaView } from './P2PStorageQuotaView';
 import { useTranslation } from '../context/LanguageContext';
+import { useFirebaseAuth } from '../context/FirebaseAuthContext';
 import { INITIAL_MASTERPIECES } from '../data/masterpieces';
 
 interface P2PNetworkHubProps {
@@ -66,6 +67,7 @@ export const P2PNetworkHub: React.FC<P2PNetworkHubProps> = ({
   onPurgeCondemnedArtwork,
 }) => {
   const { t } = useTranslation();
+  const { googleUser } = useFirebaseAuth();
   const [activeTab, setActiveTab] = useState<'network' | 'friends' | 'chat' | 'collab' | 'swarm' | 'wot' | 'storage' | 'disputes' | 'catguardian'>('network');
   const [chatSelectedFriendId, setChatSelectedFriendId] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState<string>('');
@@ -725,6 +727,15 @@ export const P2PNetworkHub: React.FC<P2PNetworkHubProps> = ({
                     </div>
                   );
                 })}
+              </div>
+            ) : !googleUser ? (
+              <div className="p-4 rounded-xl bg-amber-950/30 border border-dashed border-amber-600/40 text-center space-y-1">
+                <p className="text-xs text-amber-200 font-medium">
+                  Для живого поиска художников в сигнальной комнате войдите через Google
+                </p>
+                <p className="text-[11px] text-slate-400 max-w-lg mx-auto">
+                  Сигнальный сервер проверяет учётную запись Google и цифровую подпись ECDSA P-256. Без входа доступны инвайт-снимки и локальные архивы ниже.
+                </p>
               </div>
             ) : (
               <div className="p-4 rounded-xl bg-slate-950/60 border border-dashed border-slate-800 text-center space-y-1">

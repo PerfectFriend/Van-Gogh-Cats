@@ -26,9 +26,13 @@ import {
   announcePeerPresence,
   getOrCreateLocalEcdhKeyPair,
   getPeerEcdhPublicKey,
+  getPeerEcdhKeyState,
+  markPeerSafetyNumberVerified,
+  confirmPeerNewEcdhKey,
   computeSafetyNumber,
   getEncryptedEnvelopeById
 } from '../utils/p2pChatProtocol';
+import { PeerKeyTrustStatus } from '../utils/p2pEcdhKeys';
 
 interface P2PChatViewProps {
   artistProfile: ArtistProfile;
@@ -76,6 +80,8 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [myEcdhPublicJwk, setMyEcdhPublicJwk] = useState<JsonWebKey | null>(null);
   const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
+  const [peerKeyStatus, setPeerKeyStatus] = useState<PeerKeyTrustStatus>('none');
+  const [conflictingSafetyNumber, setConflictingSafetyNumber] = useState<string | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -105,24 +111,53 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
     };
   }, [artistProfile.id]);
 
-  // Load chat messages and compute Safety Number when active friend changes
+  const refreshPeerKeySecurity = (friend: PeerFriend | null, localJwk: JsonWebKey | null) => {
+    if (!friend || isDemoBotFriend(friend)) {
+      setSafetyNumber(null);
+      setPeerKeyStatus('none');
+      setConflictingSafetyNumber(null);
+      return;
+    }
+
+    const keyState = getPeerEcdhKeyState(friend.peerId);
+    const peerKey = keyState.pinnedJwk || friend.ecdhPublicKeyJwk || getPeerEcdhPublicKey(friend.peerId);
+    setPeerKeyStatus(keyState.status);
+
+    if (localJwk && peerKey) {
+      computeSafetyNumber(localJwk, peerKey)
+        .then((num) => setSafetyNumber(num))
+        .catch(() => setSafetyNumber(null));
+    } else {
+      setSafetyNumber(null);
+    }
+
+    if (keyState.status === 'key_changed' && localJwk && keyState.conflictingJwk) {
+      computeSafetyNumber(localJwk, keyState.conflictingJwk)
+        .then((num) => setConflictingSafetyNumber(num))
+        .catch(() => setConflictingSafetyNumber(null));
+    } else {
+      setConflictingSafetyNumber(null);
+    }
+  };
+
+  // Load chat messages and compute Safety Number + trust state when active friend changes
   useEffect(() => {
     if (activeFriend) {
       const msgs = getChatMessagesForFriend(artistProfile.id, activeFriend.peerId);
       setMessages(msgs);
-
-      const peerKey = activeFriend.ecdhPublicKeyJwk || getPeerEcdhPublicKey(activeFriend.peerId);
-      if (!isDemoBotFriend(activeFriend) && myEcdhPublicJwk && peerKey) {
-        computeSafetyNumber(myEcdhPublicJwk, peerKey)
-          .then((num) => setSafetyNumber(num))
-          .catch(() => setSafetyNumber(null));
-      } else {
-        setSafetyNumber(null);
-      }
+      refreshPeerKeySecurity(activeFriend, myEcdhPublicJwk);
     } else {
-      setSafetyNumber(null);
+      refreshPeerKeySecurity(null, myEcdhPublicJwk);
     }
   }, [activeFriend, artistProfile.id, myEcdhPublicJwk]);
+
+  useEffect(() => {
+    const onKeyChanged = () => {
+      refreshPeerKeySecurity(activeFriend, myEcdhPublicJwk);
+    };
+    window.addEventListener('p2p:peer_key_changed', onKeyChanged);
+    return () => window.removeEventListener('p2p:peer_key_changed', onKeyChanged);
+  }, [activeFriend, myEcdhPublicJwk]);
 
   // Scroll to bottom on messages update
   useEffect(() => {
@@ -411,8 +446,26 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
                         : 'Офлайн (режим DTN-конвертов)'}
                     </strong>
                     {safetyNumber && !isDemoBotFriend(activeFriend) && (
-                      <span className="font-mono text-[10px] text-cyan-300/90 bg-slate-900/90 px-1.5 py-0.5 rounded border border-cyan-800/50">
-                        Safety Number: {safetyNumber}
+                      <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-cyan-300/90 bg-slate-900/90 px-1.5 py-0.5 rounded border border-cyan-800/50">
+                        <span>SN: {safetyNumber}</span>
+                        {peerKeyStatus === 'verified' ? (
+                          <span className="text-emerald-400 font-sans font-semibold">· Подтверждён</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (markPeerSafetyNumberVerified(activeFriend.peerId, safetyNumber)) {
+                                refreshPeerKeySecurity(activeFriend, myEcdhPublicJwk);
+                                setOfflineNotice(`Safety Number для «${activeFriend.name}» отмечен как подтверждённый.`);
+                                setTimeout(() => setOfflineNotice(null), 5000);
+                              }
+                            }}
+                            className="font-sans underline text-amber-300 hover:text-amber-200 cursor-pointer"
+                            title="Нажмите после сверки Safety Number с собеседником"
+                          >
+                            Подтвердить ключ (TOFU)
+                          </button>
+                        )}
                       </span>
                     )}
                   </p>
@@ -432,6 +485,35 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
                 <span>{activeFriend.status === 'online' ? 'Смоделировать: Друг ушёл в офлайн' : 'Смоделировать: Друг вышел в сеть!'}</span>
               </button>
             </div>
+
+            {/* Key-Change Security Warning Banner */}
+            {peerKeyStatus === 'key_changed' && activeFriend && !isDemoBotFriend(activeFriend) && (
+              <div className="px-4 py-2.5 bg-rose-950/90 border-b border-rose-500/60 text-xs text-rose-100 flex flex-wrap items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <div className="font-bold text-rose-200">
+                    Ключ собеседника «{activeFriend.name}» изменился — новые сообщения с другим ключом отклонены.
+                  </div>
+                  {conflictingSafetyNumber && (
+                    <div className="font-mono text-[10px] text-rose-200/90">
+                      Новый Safety Number: {conflictingSafetyNumber}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirmPeerNewEcdhKey(activeFriend.peerId)) {
+                      refreshPeerKeySecurity(activeFriend, myEcdhPublicJwk);
+                      setOfflineNotice(`Новый ключ собеседника «${activeFriend.name}» принят (TOFU). Сверьте Safety Number!`);
+                      setTimeout(() => setOfflineNotice(null), 6000);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold cursor-pointer shrink-0"
+                >
+                  Принять новый ключ
+                </button>
+              </div>
+            )}
 
             {/* Offline Info Toast */}
             {offlineNotice && (

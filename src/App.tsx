@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Suspense } from 'react';
-import { X, Crown, Loader2 } from 'lucide-react';
+import { X, Crown, Loader2, WifiOff } from 'lucide-react';
 import { ArtStudioGenerator, StudioGenerateParams } from './components/ArtStudioGenerator';
 import { RasterThemeBackground } from './components/theming/RasterThemeBackground';
 import { SplashScreen } from './components/SplashScreen';
@@ -51,10 +51,12 @@ import { museumAudio } from './utils/museumAudio';
 import { useTranslation } from './context/LanguageContext';
 import { useFirebaseAuth } from './context/FirebaseAuthContext';
 import { auth } from './firebase';
+import { useOnlineStatus } from './hooks/useOnlineStatus';
 
 export default function App() {
   const { t, setLanguage } = useTranslation();
-  const { googleUser, cloudArtworks, saveArtworkToCloud, deleteArtworkFromCloud } = useFirebaseAuth();
+  const { googleUser, isAuthReady, cloudArtworks, saveArtworkToCloud, deleteArtworkFromCloud } = useFirebaseAuth();
+  const isOnline = useOnlineStatus();
   const [artworks, setArtworks] = useState<Artwork[]>(INITIAL_MASTERPIECES);
   const [activeArtworkId, setActiveArtworkId] = useState<string>(INITIAL_MASTERPIECES[0].id);
   const [activeModel, setActiveModel] = useState<string>('gemini-nano-banana-2.1');
@@ -233,6 +235,15 @@ export default function App() {
 
     // Merge cloud artworks synced from signed-in Google account in effect below
   }, []);
+
+  useEffect(() => {
+    if (!isAuthReady) return;
+    if (googleUser) {
+      void p2pNetwork.refreshSignalingSession();
+    } else {
+      p2pNetwork.clearSignalingSession();
+    }
+  }, [googleUser, isAuthReady]);
 
   useEffect(() => {
     if (!cloudArtworks || cloudArtworks.length === 0) return;
@@ -456,6 +467,17 @@ export default function App() {
 
       {/* Subtle Instagram Dark Mode Theme Backdrop */}
       <RasterThemeBackground />
+
+      {/* Offline PWA Mode Banner */}
+      {!isOnline && (
+        <div
+          role="status"
+          className="fixed bottom-16 left-3 md:bottom-4 md:left-[88px] xl:left-[244px] z-40 px-3.5 py-2 rounded-xl bg-amber-950/95 border border-amber-400/40 text-amber-100 text-xs shadow-xl flex items-center gap-2 backdrop-blur-xl max-w-[calc(100vw-1.5rem)]"
+        >
+          <WifiOff className="w-4 h-4 text-amber-300 shrink-0" />
+          <span>Офлайн-режим: кэшированная галерея доступна, ИИ и сеть ждут подключения</span>
+        </div>
+      )}
 
       {/* Notices */}
       {(complaintNotice || actionNotice) && (

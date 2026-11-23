@@ -384,6 +384,11 @@ export const AndroidInstallModal: React.FC<AndroidInstallModalProps> = ({ isOpen
                     {copiedCmd === 'capacitor' ? t.copied : t.copy}
                   </button>
                 </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  В <code className="text-sky-300">capacitor.config.ts</code> укажите{' '}
+                  <code className="text-sky-300">server.url</code> на ваш развёрнутый HTTPS-сервер, чтобы работали{' '}
+                  <code className="text-slate-300">/api/*</code>, <code className="text-slate-300">/ws/p2p</code> и вход через Google.
+                </p>
               </div>
             </div>
           )}

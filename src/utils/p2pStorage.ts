@@ -15,8 +15,10 @@ export const FRIEND_QUOTA_BYTES = 6400000000; // 6.4 GB (4 friends x 1.6 GB)
 export interface StoredCryptoKeyRecord {
   id: string;
   algorithm: string;
+  publicKey?: CryptoKey;
+  privateKey?: CryptoKey;
   publicKeyJwk: JsonWebKey;
-  privateKeyJwk: JsonWebKey;
+  privateKeyJwk?: JsonWebKey; // Legacy migration read-only fallback
   fingerprint: string;
   createdAt: number;
 }

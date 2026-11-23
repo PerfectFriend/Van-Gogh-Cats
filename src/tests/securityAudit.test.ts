@@ -43,17 +43,27 @@ import {
   encryptChatPayload,
   decryptChatPayload,
   computeSafetyNumber,
+  hasSeenEnvelopeReplay,
+  recordSeenEnvelope,
 } from '../utils/p2pChatProtocol';
+import {
+  registerPeerEcdhPublicKey,
+  getPeerEcdhKeyState,
+  confirmPeerNewEcdhKey,
+  markPeerSafetyNumberVerified,
+  clearPeerKeyCacheForTests,
+} from '../utils/p2pEcdhKeys';
 import {
   getOrCreatePeerEcdsaKeyPair,
   createPeerEndorsement,
   verifyEndorsementSignature,
 } from '../utils/p2pWebOfTrust';
-import { ArtistProfile, StoredUserProfile } from '../types';
+import { ArtistProfile, P2PEncryptedEnvelope, StoredUserProfile } from '../types';
 
 describe('Security & Cryptography Audit Suite', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
+    clearPeerKeyCacheForTests();
   });
 
   test('validateCatSanctity handles Unicode word boundaries accurately', () => {
@@ -225,4 +235,103 @@ describe('Security & Cryptography Audit Suite', () => {
       false
     );
   });
+
+  test('Private Web Crypto ECDH key is non-extractable and ECDSA private key never leaves WebOfTrust closure', async () => {
+    const ecdh = await getOrCreateLocalEcdhKeyPair('non_extractable_profile');
+    const ecdsa = await getOrCreatePeerEcdsaKeyPair();
+
+    assert.equal(ecdh.keyPair.privateKey.extractable, false);
+    await assert.rejects(() => globalThis.crypto.subtle.exportKey('jwk', ecdh.keyPair.privateKey));
+
+    assert.equal('keyPair' in ecdsa, false);
+    assert.equal('privateKeyJwk' in ecdsa, false);
+    assert.equal('d' in ecdsa.publicKeyJwk, false);
+    const sig = await ecdsa.sign('challenge_check');
+    assert.ok(sig.startsWith('SIG_ECDSA_'));
+  });
+
+  test('TOFU key pinning blocks silent key replacement (PEER_KEY_CHANGED) until user confirms new key', async () => {
+    const aliceId = 'peer_alice_pin';
+    const bobId = 'peer_bob_pin';
+    const attackerId = 'peer_attacker_key';
+
+    const aliceKeys = await getOrCreateLocalEcdhKeyPair(aliceId);
+    const bobKeys = await getOrCreateLocalEcdhKeyPair(bobId);
+    const otherKeys = await getOrCreateLocalEcdhKeyPair(attackerId);
+
+    // Pin Alice's authentic key on Bob's device
+    assert.equal(registerPeerEcdhPublicKey(aliceId, aliceKeys.publicKeyJwk), true);
+    const safety = await computeSafetyNumber(aliceKeys.publicKeyJwk, bobKeys.publicKeyJwk);
+    assert.equal(markPeerSafetyNumberVerified(aliceId, safety), true);
+    assert.equal(getPeerEcdhKeyState(aliceId).status, 'verified');
+
+    // Forged/rotated envelope claiming to be from aliceId with different key
+    const forgedSealed = await encryptChatPayload(
+      { text: 'Подменённое сообщение', messageId: 'm_forged' },
+      attackerId,
+      bobId,
+      {
+        envelopeId: 'env_forged_1',
+        recipientPublicKeyJwk: bobKeys.publicKeyJwk,
+        localProfileId: attackerId,
+      }
+    );
+
+    const forgedEnvelope: P2PEncryptedEnvelope = {
+      v: 2,
+      envelopeId: forgedSealed.envelopeId,
+      senderPeerId: aliceId,
+      senderName: 'Алиса?',
+      recipientPeerId: bobId,
+      recipientName: 'Боб',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60000,
+      ciphertext: forgedSealed.ciphertext,
+      iv: forgedSealed.iv,
+      salt: forgedSealed.salt,
+      contentHash: forgedSealed.contentHash,
+      senderEcdhPublicKeyJwk: otherKeys.publicKeyJwk,
+      hops: ['Алиса?'],
+      isRelayed: false,
+    };
+
+    await assert.rejects(
+      () => decryptChatPayload(forgedEnvelope, bobId, { localProfileId: bobId }),
+      /PEER_KEY_CHANGED/
+    );
+    assert.equal(getPeerEcdhKeyState(aliceId).status, 'key_changed');
+
+    // Explicit user confirmation rotates the pinned key and clears conflict
+    assert.equal(confirmPeerNewEcdhKey(aliceId), true);
+    assert.equal(getPeerEcdhKeyState(aliceId).status, 'tofu_unverified');
+  });
+
+  test('Legacy v1 envelopes are rejected on network and envelope replay protection tracks seen IDs', async () => {
+    const legacyEnvelope: P2PEncryptedEnvelope = {
+      v: 1,
+      envelopeId: 'env_legacy_v1',
+      senderPeerId: 'peer_a',
+      senderName: 'А',
+      recipientPeerId: 'peer_b',
+      recipientName: 'Б',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60000,
+      ciphertext: '00112233',
+      iv: '00112233445566778899aabb',
+      salt: '00112233445566778899aabbccddeeff',
+      contentHash: '0'.repeat(64),
+      hops: ['А'],
+      isRelayed: false,
+    };
+
+    await assert.rejects(
+      () => decryptChatPayload(legacyEnvelope, 'peer_b'),
+      /LEGACY_V1_REJECTED/
+    );
+
+    assert.equal(hasSeenEnvelopeReplay('env_replay_unique_1'), false);
+    recordSeenEnvelope('env_replay_unique_1');
+    assert.equal(hasSeenEnvelopeReplay('env_replay_unique_1'), true);
+  });
 });
+

@@ -1,8 +1,20 @@
-// Persistent ECDH P-256 Keypair & Peer Public Key Store + Safety Numbers
+// Persistent Non-Extractable ECDH P-256 Keypair & Pinned Peer Public Key Store (TOFU + Key-Change Detection)
 import { computeContentHash } from './p2pCrypto';
 import { getCryptoKeyPair, saveCryptoKeyPair } from './p2pStorage';
 
-const PEER_ECDH_KEYS_STORAGE_KEY = 'vangogh_p2p_peer_ecdh_keys';
+const PEER_ECDH_KEYS_STORAGE_KEY = 'vangogh_p2p_peer_ecdh_keys_v2';
+const LEGACY_PEER_ECDH_KEYS_STORAGE_KEY = 'vangogh_p2p_peer_ecdh_keys';
+
+export type PeerKeyTrustStatus = 'none' | 'tofu_unverified' | 'verified' | 'key_changed';
+
+export interface PeerEcdhKeyRecord {
+  jwk: JsonWebKey;
+  pinnedAt: number;
+  verified: boolean;
+  verifiedSafetyNumber?: string;
+  conflictingJwk?: JsonWebKey;
+  conflictDetectedAt?: number;
+}
 
 const localEcdhMemoryCache = new Map<string, {
   keyPair: CryptoKeyPair;
@@ -10,7 +22,7 @@ const localEcdhMemoryCache = new Map<string, {
   fingerprint: string;
 }>();
 
-const peerEcdhMemoryCache = new Map<string, JsonWebKey>();
+const peerEcdhMemoryCache = new Map<string, PeerEcdhKeyRecord>();
 
 export function getWebCrypto(): Crypto {
   if (typeof window !== 'undefined' && window.crypto) {
@@ -65,7 +77,7 @@ export function isValidEcP256Jwk(jwk: unknown): jwk is JsonWebKey {
   );
 }
 
-// Persistent ECDH P-256 keypair stored in IndexedDB (with in-memory cache for Node tests & performance)
+// Persistent non-extractable ECDH P-256 keypair stored in IndexedDB (privateKey is never extractable or serialized as JWK)
 export async function getOrCreateLocalEcdhKeyPair(profileId = 'default'): Promise<{
   keyPair: CryptoKeyPair;
   publicKeyJwk: JsonWebKey;
@@ -77,6 +89,19 @@ export async function getOrCreateLocalEcdhKeyPair(profileId = 'default'): Promis
 
   const cryptoObj = getWebCrypto();
   const stored = await getCryptoKeyPair(cacheKey);
+
+  // 1. Modern non-extractable CryptoKey handles stored in IndexedDB
+  if (stored?.publicKey && stored?.privateKey && isValidEcP256Jwk(stored.publicKeyJwk)) {
+    const entry = {
+      keyPair: { publicKey: stored.publicKey, privateKey: stored.privateKey },
+      publicKeyJwk: stored.publicKeyJwk,
+      fingerprint: stored.fingerprint,
+    };
+    localEcdhMemoryCache.set(cacheKey, entry);
+    return entry;
+  }
+
+  // 2. Migrate legacy JWK record into non-extractable CryptoKey and scrub privateKeyJwk
   if (stored && isValidEcP256Jwk(stored.publicKeyJwk) && stored.privateKeyJwk) {
     try {
       const [publicKey, privateKey] = await Promise.all([
@@ -91,10 +116,19 @@ export async function getOrCreateLocalEcdhKeyPair(profileId = 'default'): Promis
           'jwk',
           stored.privateKeyJwk,
           { name: 'ECDH', namedCurve: 'P-256' },
-          true,
+          false,
           ['deriveBits']
         ),
       ]);
+      await saveCryptoKeyPair({
+        id: cacheKey,
+        algorithm: 'ECDH-P256',
+        publicKey,
+        privateKey,
+        publicKeyJwk: stored.publicKeyJwk,
+        fingerprint: stored.fingerprint,
+        createdAt: stored.createdAt || Date.now(),
+      });
       const entry = {
         keyPair: { publicKey, privateKey },
         publicKeyJwk: stored.publicKeyJwk,
@@ -103,29 +137,28 @@ export async function getOrCreateLocalEcdhKeyPair(profileId = 'default'): Promis
       localEcdhMemoryCache.set(cacheKey, entry);
       return entry;
     } catch {
-      // Regenerate if stored JWK cannot be imported
+      // Regenerate if legacy JWK cannot be imported
     }
   }
 
+  // 3. Fresh keypair with extractable = false (privateKey cannot be read via exportKey)
   const keyPair = await cryptoObj.subtle.generateKey(
     { name: 'ECDH', namedCurve: 'P-256' },
-    true,
+    false,
     ['deriveBits']
   );
 
-  const [publicKeyJwk, privateKeyJwk] = await Promise.all([
-    cryptoObj.subtle.exportKey('jwk', keyPair.publicKey),
-    cryptoObj.subtle.exportKey('jwk', keyPair.privateKey),
-  ]);
-
+  // Public key export always works even when private key is non-extractable
+  const publicKeyJwk = await cryptoObj.subtle.exportKey('jwk', keyPair.publicKey);
   const rawHash = await computeContentHash(canonicalizeEcPublicJwk(publicKeyJwk));
   const fingerprint = `ECDH-P256:${rawHash.slice(0, 8).toUpperCase()}:${rawHash.slice(-8).toUpperCase()}`;
 
   await saveCryptoKeyPair({
     id: cacheKey,
     algorithm: 'ECDH-P256',
+    publicKey: keyPair.publicKey,
+    privateKey: keyPair.privateKey,
     publicKeyJwk,
-    privateKeyJwk,
     fingerprint,
     createdAt: Date.now(),
   });
@@ -143,46 +176,161 @@ export async function exportMyEcdhPublicJwk(profileId = 'default'): Promise<{
   return { publicKeyJwk, fingerprint };
 }
 
-export function registerPeerEcdhPublicKey(peerId: string, jwk: unknown): boolean {
-  if (!peerId || !isValidEcP256Jwk(jwk)) return false;
-  const cleanJwk: JsonWebKey = {
+function sanitizeEcPublicJwk(jwk: JsonWebKey): JsonWebKey {
+  return {
     kty: jwk.kty,
     crv: jwk.crv,
     x: jwk.x,
     y: jwk.y,
     ext: true,
   };
-  peerEcdhMemoryCache.set(peerId, cleanJwk);
+}
 
-  if (typeof localStorage !== 'undefined') {
-    try {
-      const raw = localStorage.getItem(PEER_ECDH_KEYS_STORAGE_KEY);
-      const map: Record<string, JsonWebKey> = raw ? JSON.parse(raw) : {};
-      map[peerId] = cleanJwk;
-      localStorage.setItem(PEER_ECDH_KEYS_STORAGE_KEY, JSON.stringify(map));
-    } catch {}
+function loadPeerRecordFromStorage(peerId: string): PeerEcdhKeyRecord | null {
+  const mem = peerEcdhMemoryCache.get(peerId);
+  if (mem) return mem;
+
+  if (typeof localStorage === 'undefined') return null;
+
+  try {
+    const raw = localStorage.getItem(PEER_ECDH_KEYS_STORAGE_KEY);
+    if (raw) {
+      const map = JSON.parse(raw) as Record<string, PeerEcdhKeyRecord>;
+      const rec = map[peerId];
+      if (rec && isValidEcP256Jwk(rec.jwk)) {
+        peerEcdhMemoryCache.set(peerId, rec);
+        return rec;
+      }
+    }
+
+    // Read-only migration from v1 unpinned JWK map
+    const legacyRaw = localStorage.getItem(LEGACY_PEER_ECDH_KEYS_STORAGE_KEY);
+    if (legacyRaw) {
+      const legacyMap = JSON.parse(legacyRaw) as Record<string, JsonWebKey>;
+      if (legacyMap[peerId] && isValidEcP256Jwk(legacyMap[peerId])) {
+        const migrated: PeerEcdhKeyRecord = {
+          jwk: sanitizeEcPublicJwk(legacyMap[peerId]),
+          pinnedAt: Date.now(),
+          verified: false,
+        };
+        savePeerRecordToStorage(peerId, migrated);
+        return migrated;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function savePeerRecordToStorage(peerId: string, record: PeerEcdhKeyRecord): void {
+  peerEcdhMemoryCache.set(peerId, record);
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(PEER_ECDH_KEYS_STORAGE_KEY);
+    const map: Record<string, PeerEcdhKeyRecord> = raw ? JSON.parse(raw) : {};
+    map[peerId] = record;
+    localStorage.setItem(PEER_ECDH_KEYS_STORAGE_KEY, JSON.stringify(map));
+  } catch {}
+}
+
+// Pin peer ECDH key via TOFU; reject silent overwrites when key changes unless explicitly forced
+export function registerPeerEcdhPublicKey(
+  peerId: string,
+  jwk: unknown,
+  options?: { forceAccept?: boolean }
+): boolean {
+  if (!peerId || !isValidEcP256Jwk(jwk)) return false;
+  const cleanJwk = sanitizeEcPublicJwk(jwk);
+  const existing = loadPeerRecordFromStorage(peerId);
+
+  if (!existing || options?.forceAccept) {
+    savePeerRecordToStorage(peerId, {
+      jwk: cleanJwk,
+      pinnedAt: Date.now(),
+      verified: false,
+    });
+    return true;
   }
-  return true;
+
+  if (canonicalizeEcPublicJwk(existing.jwk) === canonicalizeEcPublicJwk(cleanJwk)) {
+    return true;
+  }
+
+  // Key changed unexpectedly: keep existing pinned key intact and record conflict warning
+  const updatedConflict: PeerEcdhKeyRecord = {
+    ...existing,
+    conflictingJwk: cleanJwk,
+    conflictDetectedAt: Date.now(),
+  };
+  savePeerRecordToStorage(peerId, updatedConflict);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('p2p:peer_key_changed', { detail: { peerId } }));
+  }
+  return false;
 }
 
 export function getPeerEcdhPublicKey(peerId: string): JsonWebKey | null {
   if (!peerId) return null;
-  const fromMem = peerEcdhMemoryCache.get(peerId);
-  if (fromMem) return fromMem;
+  return loadPeerRecordFromStorage(peerId)?.jwk || null;
+}
 
-  if (typeof localStorage !== 'undefined') {
-    try {
-      const raw = localStorage.getItem(PEER_ECDH_KEYS_STORAGE_KEY);
-      if (raw) {
-        const map = JSON.parse(raw) as Record<string, JsonWebKey>;
-        if (map[peerId] && isValidEcP256Jwk(map[peerId])) {
-          peerEcdhMemoryCache.set(peerId, map[peerId]);
-          return map[peerId];
-        }
-      }
-    } catch {}
+export function getPeerEcdhKeyState(peerId: string): {
+  status: PeerKeyTrustStatus;
+  pinnedJwk: JsonWebKey | null;
+  conflictingJwk?: JsonWebKey;
+  verifiedSafetyNumber?: string;
+} {
+  if (!peerId) {
+    return { status: 'none', pinnedJwk: null };
   }
-  return null;
+  const rec = loadPeerRecordFromStorage(peerId);
+  if (!rec) {
+    return { status: 'none', pinnedJwk: null };
+  }
+  if (rec.conflictingJwk && isValidEcP256Jwk(rec.conflictingJwk)) {
+    return {
+      status: 'key_changed',
+      pinnedJwk: rec.jwk,
+      conflictingJwk: rec.conflictingJwk,
+      verifiedSafetyNumber: rec.verifiedSafetyNumber,
+    };
+  }
+  return {
+    status: rec.verified ? 'verified' : 'tofu_unverified',
+    pinnedJwk: rec.jwk,
+    verifiedSafetyNumber: rec.verifiedSafetyNumber,
+  };
+}
+
+export function markPeerSafetyNumberVerified(peerId: string, safetyNumber: string): boolean {
+  const rec = loadPeerRecordFromStorage(peerId);
+  if (!rec) return false;
+  savePeerRecordToStorage(peerId, {
+    ...rec,
+    verified: true,
+    verifiedSafetyNumber: safetyNumber,
+    conflictingJwk: undefined,
+    conflictDetectedAt: undefined,
+  });
+  return true;
+}
+
+export function confirmPeerNewEcdhKey(peerId: string): boolean {
+  const rec = loadPeerRecordFromStorage(peerId);
+  if (!rec?.conflictingJwk || !isValidEcP256Jwk(rec.conflictingJwk)) return false;
+  savePeerRecordToStorage(peerId, {
+    jwk: sanitizeEcPublicJwk(rec.conflictingJwk),
+    pinnedAt: Date.now(),
+    verified: false,
+  });
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('p2p:peer_key_changed', { detail: { peerId, confirmed: true } }));
+  }
+  return true;
+}
+
+export function clearPeerKeyCacheForTests(): void {
+  peerEcdhMemoryCache.clear();
+  localEcdhMemoryCache.clear();
 }
 
 // Compute symmetric Safety Number (30 digits in 6x5-digit blocks) from both peers' ECDH public keys

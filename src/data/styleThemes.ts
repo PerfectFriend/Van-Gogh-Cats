@@ -1,16 +1,16 @@
 import { StyleThemeVisuals } from '../types';
 
-import bgStarryNight from '../assets/images/bg_starry_night_theme_1790085994094.jpg';
-import bgSunflowers from '../assets/images/bg_sunflowers_theme_1790086007518.jpg';
-import bgAlmond from '../assets/images/bg_almond_theme_1790086022648.jpg';
-import bgKlimt from '../assets/images/bg_klimt_theme_1790086038877.jpg';
-import bgHokusai from '../assets/images/bg_hokusai_theme_1790086054597.jpg';
-import bgCafe from '../assets/images/two_black_cats_cafe_1789832567987.jpg';
-import bgBedroom from '../assets/images/two_cats_bedroom_1789832606798.jpg';
-import bgWheatfield from '../assets/images/two_cats_wheatfield_1789832618041.jpg';
-import bgIrises from '../assets/images/two_cats_irises_1789832630987.jpg';
-import bgRhone from '../assets/images/two_cats_rhone_1789832668004.jpg';
-import bgVineyard from '../assets/images/two_cats_vineyard_1789832644644.jpg';
+import bgStarryNight from '../assets/images/bg_starry_night_theme_1790085994094.webp';
+import bgSunflowers from '../assets/images/bg_sunflowers_theme_1790086007518.webp';
+import bgAlmond from '../assets/images/bg_almond_theme_1790086022648.webp';
+import bgKlimt from '../assets/images/bg_klimt_theme_1790086038877.webp';
+import bgHokusai from '../assets/images/bg_hokusai_theme_1790086054597.webp';
+import bgCafe from '../assets/images/two_black_cats_cafe_1789832567987.webp';
+import bgBedroom from '../assets/images/two_cats_bedroom_1789832606798.webp';
+import bgWheatfield from '../assets/images/two_cats_wheatfield_1789832618041.webp';
+import bgIrises from '../assets/images/two_cats_irises_1789832630987.webp';
+import bgRhone from '../assets/images/two_cats_rhone_1789832668004.webp';
+import bgVineyard from '../assets/images/two_cats_vineyard_1789832644644.webp';
 
 export const STYLE_THEMES: Record<string, StyleThemeVisuals> = {
   starry_night: {

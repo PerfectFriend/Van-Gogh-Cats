@@ -308,8 +308,8 @@ export const InstagramNav: React.FC<InstagramNavProps> = ({
         </button>
       </aside>
 
-      {/* 2. MOBILE COMPACT TOP BAR (h-12, single row) */}
-      <header className="md:hidden sticky top-0 z-40 h-12 px-4 bg-[#060916]/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between">
+      {/* 2. MOBILE COMPACT TOP BAR (h-12 + safe-area-top, single row) */}
+      <header className="md:hidden sticky top-0 z-40 min-h-12 pt-[env(safe-area-inset-top)] px-4 bg-[#060916]/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between">
         <button
           type="button"
           {...brandLongPress.handlers}
@@ -341,8 +341,8 @@ export const InstagramNav: React.FC<InstagramNavProps> = ({
         </div>
       </header>
 
-      {/* 3. MOBILE FIXED BOTTOM TAB BAR (h-14, 5 icons) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 h-14 bg-[#060916]/95 backdrop-blur-xl border-t border-white/10 grid grid-cols-5 items-center">
+      {/* 3. MOBILE FIXED BOTTOM TAB BAR (h-14 + safe-area-bottom, 5 icons) */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 min-h-14 pb-[env(safe-area-inset-bottom)] bg-[#060916]/95 backdrop-blur-xl border-t border-white/10 grid grid-cols-5 items-center">
         <button
           type="button"
           onClick={() => {

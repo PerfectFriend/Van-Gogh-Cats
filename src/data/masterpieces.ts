@@ -1,23 +1,23 @@
 import { Artwork } from '../types';
 
-import vanGoghStarryCat from '../assets/images/van_gogh_cat_1785425794750.jpg';
-import vanGoghSunflowerCat from '../assets/images/sunflower_kitty_1785425809103.jpg';
-import vanGoghCafeCat from '../assets/images/cafe_terrace_cat_1785425822088.jpg';
-import vanGoghAlmondCat from '../assets/images/almond_blossom_cat_1789317351101.jpg';
-import vanGoghBedroomCat from '../assets/images/bedroom_arles_cat_1789317364061.jpg';
-import vanGoghWheatfieldCat from '../assets/images/wheatfield_cat_1789317378784.jpg';
+import vanGoghStarryCat from '../assets/images/van_gogh_cat_1785425794750.webp';
+import vanGoghSunflowerCat from '../assets/images/sunflower_kitty_1785425809103.webp';
+import vanGoghCafeCat from '../assets/images/cafe_terrace_cat_1785425822088.webp';
+import vanGoghAlmondCat from '../assets/images/almond_blossom_cat_1789317351101.webp';
+import vanGoghBedroomCat from '../assets/images/bedroom_arles_cat_1789317364061.webp';
+import vanGoghWheatfieldCat from '../assets/images/wheatfield_cat_1789317378784.webp';
 
 // The Two Black Cats Collection (Pure Black & Stylish Tuxedo Cat)
-import twoCatsStarry from '../assets/images/two_black_cats_starry_1789832553888.jpg';
-import twoCatsCafe from '../assets/images/two_black_cats_cafe_1789832567987.jpg';
-import twoCatsSunflowers from '../assets/images/two_cats_sunflowers_1789832581939.jpg';
-import twoCatsAlmond from '../assets/images/two_cats_almond_1789832594254.jpg';
-import twoCatsBedroom from '../assets/images/two_cats_bedroom_1789832606798.jpg';
-import twoCatsWheatfield from '../assets/images/two_cats_wheatfield_1789832618041.jpg';
-import twoCatsIrises from '../assets/images/two_cats_irises_1789832630987.jpg';
-import twoCatsVineyard from '../assets/images/two_cats_vineyard_1789832644644.jpg';
-import twoCatsOlives from '../assets/images/two_cats_olives_1789832655854.jpg';
-import twoCatsRhone from '../assets/images/two_cats_rhone_1789832668004.jpg';
+import twoCatsStarry from '../assets/images/two_black_cats_starry_1789832553888.webp';
+import twoCatsCafe from '../assets/images/two_black_cats_cafe_1789832567987.webp';
+import twoCatsSunflowers from '../assets/images/two_cats_sunflowers_1789832581939.webp';
+import twoCatsAlmond from '../assets/images/two_cats_almond_1789832594254.webp';
+import twoCatsBedroom from '../assets/images/two_cats_bedroom_1789832606798.webp';
+import twoCatsWheatfield from '../assets/images/two_cats_wheatfield_1789832618041.webp';
+import twoCatsIrises from '../assets/images/two_cats_irises_1789832630987.webp';
+import twoCatsVineyard from '../assets/images/two_cats_vineyard_1789832644644.webp';
+import twoCatsOlives from '../assets/images/two_cats_olives_1789832655854.webp';
+import twoCatsRhone from '../assets/images/two_cats_rhone_1789832668004.webp';
 
 export const INITIAL_MASTERPIECES: Artwork[] = [
   {
