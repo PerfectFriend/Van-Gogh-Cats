@@ -55,6 +55,7 @@ export const P2PCollaborativeCanvas: React.FC<P2PCollaborativeCanvasProps> = ({
   const [strokes, setStrokes] = useState<CanvasStroke[]>([]);
   const [remoteCursors, setRemoteCursors] = useState<PeerCanvasCursor[]>([]);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
+  const [confirmClear, setConfirmClear] = useState<boolean>(false);
   const [activePeersInRoom, setActivePeersInRoom] = useState<{ id: string; name: string; color: string }[]>([
     { id: 'peer_theo', name: 'Тео Ван Гог', color: 'bg-blue-600' },
     { id: 'peer_arles', name: 'Арльский Мурлыка', color: 'bg-emerald-600' },
@@ -225,10 +226,14 @@ export const P2PCollaborativeCanvas: React.FC<P2PCollaborativeCanvasProps> = ({
   };
 
   const handleClear = () => {
-    if (window.confirm('Очистить общий холст мастерской для всех подключённых друзей?')) {
-      setStrokes([]);
-      collabCanvasManager.broadcastClear(artistProfile.id);
+    if (!confirmClear) {
+      setConfirmClear(true);
+      setTimeout(() => setConfirmClear(false), 4000);
+      return;
     }
+    setStrokes([]);
+    collabCanvasManager.broadcastClear(artistProfile.id);
+    setConfirmClear(false);
   };
 
   const handleUndo = () => {
@@ -382,10 +387,15 @@ export const P2PCollaborativeCanvas: React.FC<P2PCollaborativeCanvasProps> = ({
           </button>
           <button
             onClick={handleClear}
-            title="Очистить весь холст"
-            className="p-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-300 transition-colors"
+            title={confirmClear ? 'Нажмите ещё раз для очистки холста' : 'Очистить весь холст'}
+            className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 ${
+              confirmClear
+                ? 'bg-red-600 text-white px-2 text-xs font-bold'
+                : 'bg-red-950/40 hover:bg-red-900/60 text-red-300'
+            }`}
           >
             <Trash2 className="w-4 h-4" />
+            {confirmClear && <span>Очистить?</span>}
           </button>
         </div>
       </div>

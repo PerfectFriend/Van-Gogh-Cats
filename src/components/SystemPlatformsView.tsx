@@ -245,34 +245,35 @@ export const SystemPlatformsView: React.FC<SystemPlatformsViewProps> = ({
           </div>
 
           <p className="text-xs text-cyan-200/70 font-cyber">
-            Готовые бинарные дистрибутивы для хостов Ubuntu 22.04 / 24.04 LTS:
+            Установщик рабочего стола для Ubuntu 22.04 / 24.04 LTS или локальная сборка .deb / .tar.gz в <code className="text-amber-300">dist/packages/</code>:
           </p>
 
-          {/* Download Buttons */}
+          {/* Installer & Build Actions */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <a
-              href="/vangogh-cats-gallery_latest_all.deb"
-              download
+              href="/install-ubuntu.sh"
+              download="install-ubuntu.sh"
               className="p-3.5 rounded-2xl bg-orange-950/40 hover:bg-orange-900/50 border border-orange-500/50 flex items-center gap-3 text-orange-200 transition-all cursor-pointer"
             >
               <Download className="w-5 h-5 text-orange-400 shrink-0" />
               <div>
-                <p className="text-xs font-bold">Скачать .deb пакет</p>
-                <p className="text-[10px] text-orange-300/70 font-cyber">Ubuntu 22.04 / 24.04</p>
+                <p className="text-xs font-bold">Скачать install-ubuntu.sh</p>
+                <p className="text-[10px] text-orange-300/70 font-cyber">Ярлык и интеграция с GNOME</p>
               </div>
             </a>
 
-            <a
-              href="/vangogh-cats-gallery_latest_linux.tar.gz"
-              download
-              className="p-3.5 rounded-2xl bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-700/60 flex items-center gap-3 text-cyan-200 transition-all cursor-pointer"
+            <button
+              onClick={() => handleCopy('npm run package:ubuntu', 'pkg')}
+              className="p-3.5 rounded-2xl bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-700/60 flex items-center gap-3 text-cyan-200 transition-all cursor-pointer text-left"
             >
-              <Download className="w-5 h-5 text-cyan-400 shrink-0" />
+              <Terminal className="w-5 h-5 text-cyan-400 shrink-0" />
               <div>
-                <p className="text-xs font-bold">Скачать .tar.gz архив</p>
-                <p className="text-[10px] text-cyan-300/70 font-cyber">Портативная версия</p>
+                <p className="text-xs font-bold">
+                  {copiedCmd === 'pkg' ? 'Команда скопирована!' : 'Собрать .deb и .tar.gz'}
+                </p>
+                <p className="text-[10px] text-cyan-300/70 font-cyber">npm run package:ubuntu</p>
               </div>
-            </a>
+            </button>
           </div>
 
           {/* Fast deployment CLI snippet */}

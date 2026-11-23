@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { X, Sparkles, Upload, Wand2, Loader2, ArrowRight, Check, AlertTriangle, RefreshCw } from 'lucide-react';
+import { X, Upload, Wand2, Loader2, AlertTriangle, LogIn } from 'lucide-react';
 import { Artwork } from '../types';
 import { useTranslation } from '../context/LanguageContext';
+import { useFirebaseAuth } from '../context/FirebaseAuthContext';
+import { auth } from '../firebase';
 
 interface ImageEditorModalProps {
   artwork: Artwork | null;
@@ -21,6 +23,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
   isBannedReadOnly
 }) => {
   const { t } = useTranslation();
+  const { googleUser, signInWithGoogle, isSigningIn } = useFirebaseAuth();
   const [prompt, setPrompt] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +35,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isBannedReadOnly) {
-      alert(t.editorBannedAlert);
+      setError(t.editorBannedAlert);
       return;
     }
     const file = e.target.files?.[0];
@@ -49,7 +52,11 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isBannedReadOnly) {
-      alert(t.editorBannedAlert);
+      setError(t.editorBannedAlert);
+      return;
+    }
+    if (!auth.currentUser) {
+      setError('Для редактирования картины с помощью Nano Banana 2 сначала войдите через Google.');
       return;
     }
     if (!prompt.trim() || isEditing) return;
@@ -71,9 +78,13 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         });
       }
 
+      const idToken = await auth.currentUser.getIdToken();
       const response = await fetch('/api/edit-image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
         body: JSON.stringify({
           imageBase64: base64Data,
           mimeType: 'image/jpeg',
@@ -199,9 +210,22 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
 
               {/* Error Box */}
               {error && (
-                <div className="p-3 rounded-xl bg-rose-950/80 border border-rose-500/80 text-xs text-rose-200 flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                  <span>{error}</span>
+                <div className="p-3 rounded-xl bg-rose-950/80 border border-rose-500/80 text-xs text-rose-200 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                  {!googleUser && (
+                    <button
+                      type="button"
+                      onClick={() => signInWithGoogle()}
+                      disabled={isSigningIn}
+                      className="px-3 py-1.5 rounded-lg bg-white text-slate-950 font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <LogIn className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Войти через Google</span>
+                    </button>
+                  )}
                 </div>
               )}
 

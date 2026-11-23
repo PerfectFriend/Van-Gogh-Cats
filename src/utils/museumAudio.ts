@@ -309,18 +309,29 @@ class MuseumAudioEngine {
 
     try {
       if (!audioDataUrl) {
+        let idToken: string | null = null;
+        try {
+          const { auth } = await import('../firebase');
+          idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+        } catch {
+          idToken = null;
+        }
+
         const response = await fetch('/api/tts', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+          },
           body: JSON.stringify({
             text,
             voice: voiceToUse
           })
         });
 
-        const data = await response.json();
-        if (!data.success || !data.audioDataUrl) {
-          throw new Error(data.message || 'TTS synthesis failed');
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success || !data.audioDataUrl) {
+          throw new Error(data.message || data.error || 'TTS synthesis failed');
         }
 
         audioDataUrl = data.audioDataUrl;

@@ -149,6 +149,7 @@ export const ArtStudioGenerator: React.FC<ArtStudioGeneratorProps> = ({
   const [batchCount, setBatchCount] = useState<1 | 3>(1);
   const [referenceImages, setReferenceImages] = useState<ReferenceCatPhoto[]>([]);
   const [isOptionsSheetOpen, setIsOptionsSheetOpen] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
     if (activeStyleId && activeStyleId !== selectedPresetId) {
@@ -205,8 +206,13 @@ export const ArtStudioGenerator: React.FC<ArtStudioGeneratorProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLocalError(null);
     if (isBannedReadOnly) {
-      alert(t.bannedReadOnlyAlert);
+      setLocalError(t.bannedReadOnlyAlert);
+      return;
+    }
+    if (!googleUser) {
+      setLocalError('Для генерации новых картин с ИИ сначала войдите через Google.');
       return;
     }
     if ((!prompt.trim() && referenceImages.length === 0) || isGenerating) return;
@@ -579,13 +585,13 @@ export const ArtStudioGenerator: React.FC<ArtStudioGeneratorProps> = ({
       </form>
 
       {/* Error Notice */}
-      {error && (
+      {(error || localError) && (
         <div className="p-4 rounded-2xl bg-rose-950/60 border border-rose-500/40 text-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-start gap-2.5">
             <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div className="text-xs">
               <p className="font-semibold text-amber-300">{t.errorGenerate}</p>
-              <p className="text-slate-200 mt-0.5 leading-relaxed">{error}</p>
+              <p className="text-slate-200 mt-0.5 leading-relaxed">{localError || error}</p>
             </div>
           </div>
 
@@ -601,13 +607,16 @@ export const ArtStudioGenerator: React.FC<ArtStudioGeneratorProps> = ({
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Шедевр музея</span>
             </button>
-            <button
-              type="button"
-              onClick={onClearError}
-              className="px-3 py-1.5 rounded-lg bg-white/10 text-slate-200 text-xs cursor-pointer"
-            >
-              {t.close}
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLocalError(null);
+                  onClearError();
+                }}
+                className="px-3 py-1.5 rounded-lg bg-white/10 text-slate-200 text-xs cursor-pointer"
+              >
+                {t.close}
+              </button>
           </div>
         </div>
       )}

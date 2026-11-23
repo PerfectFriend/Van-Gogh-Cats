@@ -40,6 +40,7 @@ export interface Artwork {
   isCondemned?: boolean;
   condemnedReason?: string;
   catProfileId?: string;
+  contentHash?: string;
 }
 
 // Digital Cat Passport & Identity
@@ -150,8 +151,7 @@ export interface ArtistProfile {
 }
 
 export interface StoredUserProfile extends ArtistProfile {
-  seedPhrase?: string;     // 12-word BIP-39 mnemonic
-  pinHash?: string;        // SHA-256 hash of PIN + salt
+  pinHash?: string;        // PBKDF2-SHA256 hash of PIN + salt
   pinSalt?: string;        // Random salt
   isCurrent?: boolean;     // Active profile flag
   catPassportId?: string;
@@ -180,6 +180,8 @@ export interface PeerFriend {
   isAuditor?: boolean;
   isBannedReadOnly?: boolean;
   latencyMs?: number;
+  ecdhPublicKeyJwk?: JsonWebKey;
+  ecdsaPublicKeyJwk?: JsonWebKey;
 }
 
 export interface SignalingPeer {
@@ -188,6 +190,8 @@ export interface SignalingPeer {
   avatarColor: string;
   lastHeartbeat: number;
   artworkCount: number;
+  ecdhPublicKeyJwk?: JsonWebKey;
+  ecdsaPublicKeyJwk?: JsonWebKey;
 }
 
 export interface AuditorVote {
@@ -234,6 +238,7 @@ export interface PeerDispute {
   ratio?: number;                // Calculated confirm/reject ratio
   status: 'pending' | 'condemned' | 'acquitted';
   verdictNote?: string;
+  isDemo?: boolean;
 }
 
 export interface P2PNetworkStats {
@@ -260,9 +265,11 @@ export interface P2PChatMessage {
   deliveryRoute: string[]; // e.g. ['Вы', 'Курьер: Арльский Мурлыка', 'Адресат']
   isE2EE: boolean;
   isRelayedDelivery?: boolean;
+  isDemoBot?: boolean;
 }
 
 export interface P2PEncryptedEnvelope {
+  v?: number; // 2 = ECDH P-256 + HKDF-SHA256 + AES-GCM w/ AAD; 1 = legacy unauthenticated
   envelopeId: string;
   senderPeerId: string;
   senderName: string;
@@ -274,6 +281,7 @@ export interface P2PEncryptedEnvelope {
   iv: string; // Initialization vector (hex)
   salt: string;
   contentHash: string; // Integrity verification
+  senderEcdhPublicKeyJwk?: JsonWebKey;
   hops: string[]; // Peer names who relayed the envelope
   isRelayed: boolean;
 }
@@ -389,6 +397,8 @@ export interface PeerEndorsement {
   trustScoreAssigned: number; // 1 to 5 stars
   statement: string;          // Testimonial / vouched words
   digitalSignature: string;   // Cryptographic signature of payload
+  endorserPublicKeyJwk?: JsonWebKey; // ECDSA P-256 public key for verification
+  isDemo?: boolean;
   timestamp: number;
   txHash: string;
 }

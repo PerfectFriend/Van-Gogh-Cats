@@ -8,10 +8,10 @@ export const P2PStorageQuotaView: React.FC = () => {
     totalCapacityBytes: TOTAL_8GB_BYTES,
     ownReservedBytes: OWN_QUOTA_BYTES,
     friendsReservedBytes: FRIEND_QUOTA_BYTES,
-    ownUsedBytes: 42000000,
-    friendsUsedBytes: 168000000,
-    activeCustodiansCount: 4,
-    wholeFilesCount: 20,
+    ownUsedBytes: 0,
+    friendsUsedBytes: 0,
+    activeCustodiansCount: 0,
+    wholeFilesCount: 0,
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -50,16 +50,16 @@ export const P2PStorageQuotaView: React.FC = () => {
             <HardDrive className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-base text-amber-200 flex items-center gap-2">
-              <span>Архитектура круговой квоты «8 ГБ Круг Хранения»</span>
-              <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-700/50 px-2 py-0.5 rounded-full font-mono">
-                Zero-CPU Streaming
+            <h3 className="font-bold text-base text-amber-200 flex items-center gap-2 flex-wrap">
+              <span>Локальная квота IndexedDB устройства (прототип кругового резервирования)</span>
+              <span className="text-[10px] bg-slate-900 text-amber-300 border border-amber-700/50 px-2 py-0.5 rounded-full font-mono">
+                Прототип квоты 8 ГБ
               </span>
             </h3>
             <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-              Строго 8 000 МБ дискового пространства без микрочанков и шифрования: 
-              <strong> 1 600 МБ</strong> под личные шедевры (~800 картин) и 
-              <strong> 6 400 МБ</strong> для хранения реплик картин 4 доверенных друзей (по 1 600 МБ на друга).
+              Расчётная модель локального браузерного хранилища IndexedDB:
+              <strong> 1 600 МБ</strong> под личные картины и 
+              <strong> 6 400 МБ</strong> под резервы пиров (4 слота по 1 600 МБ). Показатели ниже отражают реальный объём сохранённых на этом устройстве данных.
             </p>
           </div>
         </div>
@@ -129,7 +129,10 @@ export const P2PStorageQuotaView: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {[1, 2, 3, 4].map((slotIdx) => {
             const isAssigned = slotIdx <= quota.activeCustodiansCount;
-            const simulatedUsed = isAssigned ? Math.round(quota.friendsUsedBytes / quota.activeCustodiansCount) : 0;
+            const simulatedUsed =
+              isAssigned && quota.activeCustodiansCount > 0
+                ? Math.round(quota.friendsUsedBytes / quota.activeCustodiansCount)
+                : 0;
 
             return (
               <div

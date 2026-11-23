@@ -60,6 +60,7 @@ const INITIAL_DEMO_DISPUTES: PeerDispute[] = [
     rejectWeight: 1,
     ratio: 5.0,
     status: 'pending',
+    isDemo: true,
   },
 ];
 
@@ -287,7 +288,7 @@ export function filePeerComplaint(
   };
 
   const newDispute: PeerDispute = {
-    id: 'dispute_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+    id: 'dispute_' + (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)),
     artworkId: artwork.id,
     artworkTitle: artwork.title,
     artworkImageUrl: artwork.imageUrl,

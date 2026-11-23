@@ -1,8 +1,8 @@
 // P2P and Cryptographic identity utils using Web Crypto API
 import { ArtistProfile, Artwork } from '../types';
+export { validateCatSanctity } from './catSanctity';
 
 const ARTIST_PROFILE_KEY = 'vangogh_artist_profile';
-const ARTIST_KEYPAIR_KEY = 'vangogh_artist_keypair_raw';
 
 const PAINTER_NAMES = [
   'Винсент Рыжехвостый',
@@ -23,6 +23,16 @@ const AVATAR_PALETTES = [
   'from-amber-600 to-orange-800',
 ];
 
+function getCrypto(): Crypto {
+  if (typeof window !== 'undefined' && window.crypto) {
+    return window.crypto;
+  }
+  if (typeof globalThis !== 'undefined' && (globalThis as unknown as { crypto?: Crypto }).crypto) {
+    return (globalThis as unknown as { crypto: Crypto }).crypto;
+  }
+  throw new Error('Web Crypto API is unavailable in this environment');
+}
+
 // Generate or retrieve persistent artist profile
 export async function getOrCreateArtistProfile(): Promise<{ profile: ArtistProfile; keyFingerprint: string }> {
   const cached = localStorage.getItem(ARTIST_PROFILE_KEY);
@@ -35,15 +45,10 @@ export async function getOrCreateArtistProfile(): Promise<{ profile: ArtistProfi
     }
   }
 
-  // Create unique key fingerprint
-  let fingerprint = '';
-  try {
-    const array = new Uint8Array(16);
-    window.crypto.getRandomValues(array);
-    fingerprint = Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
-  } catch {
-    fingerprint = 'cat_' + Math.random().toString(36).substring(2, 15);
-  }
+  const cryptoObj = getCrypto();
+  const array = new Uint8Array(16);
+  cryptoObj.getRandomValues(array);
+  const fingerprint = Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
 
   const randomName = PAINTER_NAMES[Math.floor(Math.random() * PAINTER_NAMES.length)];
   const randomPalette = AVATAR_PALETTES[Math.floor(Math.random() * AVATAR_PALETTES.length)];
@@ -83,53 +88,30 @@ export function setArtistReadOnlyBan(reason: string): ArtistProfile | null {
   return null;
 }
 
-// Compute simple SHA-256 hash of text for digital fingerprint
+// Compute full 256-bit (64 lowercase hex chars) SHA-256 hash; fails closed if Web Crypto is unavailable
 export async function computeContentHash(content: string): Promise<string> {
-  try {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(content);
-    const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
-  } catch {
-    return Math.random().toString(36).substring(2, 14);
-  }
+  const cryptoObj = getCrypto();
+  const encoder = new TextEncoder();
+  const data = encoder.encode(content);
+  const hashBuffer = await cryptoObj.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Strict Cat Validation: "Запрещено всё кроме котов"
-export function validateCatSanctity(prompt: string, title?: string): { isCat: boolean; reason?: string } {
-  const combined = `${prompt} ${title || ''}`.toLowerCase();
-  
-  // Forbidden non-cat domestic animals if explicitly requested without a cat
-  const dogKeywords = ['собака', 'щенок', 'пес', 'пёс', 'дог', 'dog', 'puppy', 'hound', 'canine', 'chihuahua', 'husky'];
-  const catKeywords = ['кот', 'кошка', 'котик', 'котёнок', 'котенок', 'кошач', 'котя', 'мяу', 'мур', 'cat', 'kitten', 'feline', 'kitty', 'tabby', 'tom'];
-
-  const hasCat = catKeywords.some(kw => combined.includes(kw));
-  const hasDog = dogKeywords.some(kw => combined.includes(kw));
-
-  if (!hasCat) {
-    return {
-      isCat: false,
-      reason: 'В децентрализованной сети Ван Гога действует строгое правило: картина ОБЯЗАТЕЛЬНО должна изображать кота или кошку!',
-    };
-  }
-
-  if (hasDog && !combined.includes('кот')) {
-    return {
-      isCat: false,
-      reason: 'Обнаружены несоответствующие животные. В галерее разрешены исключительно котики.',
-    };
-  }
-
-  return { isCat: true };
-}
-
-// Export whole gallery as a standalone .catpack file (offline backup)
+// Export whole gallery as a standalone .catpack file (offline public metadata + artworks backup)
 export function exportCatPack(profile: ArtistProfile, artworks: Artwork[]): void {
+  if (typeof document === 'undefined') return;
   const pack = {
     version: '1.0-p2p',
     exportedAt: new Date().toISOString(),
-    artist: profile,
+    artist: {
+      id: profile.id,
+      name: profile.name,
+      avatarColor: profile.avatarColor,
+      bio: profile.bio,
+      createdAt: profile.createdAt,
+      totalCreations: profile.totalCreations,
+    },
     artworks: artworks.filter(a => a.isUserCreated || a.source === 'my-local'),
   };
 

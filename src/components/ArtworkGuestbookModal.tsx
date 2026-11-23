@@ -226,7 +226,7 @@ export const ArtworkGuestbookModal: React.FC<ArtworkGuestbookModalProps> = ({
                     {entry.isP2PVerified && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#121946] text-cyan-300 text-[10px] border border-cyan-400/50 font-mono">
                         <CheckCircle2 className="w-3 h-3 text-cyan-400" />
-                        <span>P2P Merkle-Signed</span>
+                        <span>Локальная запись (демо)</span>
                       </span>
                     )}
                   </div>
@@ -257,7 +257,7 @@ export const ArtworkGuestbookModal: React.FC<ArtworkGuestbookModalProps> = ({
         {/* Footer */}
         <div className="px-5 py-3.5 bg-[#080d2c]/90 border-t border-indigo-900/60 flex items-center justify-between text-xs text-cyan-200/80 relative z-10">
           <span className="text-[11px] font-mono text-cyan-300/80">
-            Музейные отзывы хранятся в децентрализованной сети
+            Локальная книга отзывов устройства (localStorage, демо)
           </span>
           <button
             onClick={onClose}

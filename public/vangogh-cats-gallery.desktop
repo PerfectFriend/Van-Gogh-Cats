@@ -16,7 +16,7 @@ GenericName=Art Gallery & AI Studio
 GenericName[ru]=Галерея искусств и AI-студия
 Comment=Art Gallery & AI Studio of Van Gogh inspired cats
 Comment[ru]=Интерактивная галерея шедевров и AI-генератор котиков в стиле Вана Гога
-Exec=google-chrome --app="https://ais-pre-ypwd3d2freqhamtros5prz-468670053177.europe-west3.run.app" --class=vangogh-cats-gallery %u
+Exec=google-chrome --app="http://localhost:3000" --class=vangogh-cats-gallery %u
 Icon=vangogh-cats-gallery
 Terminal=false
 Categories=Graphics;Photography;Art;AudioVideo;
@@ -27,14 +27,14 @@ Actions=NewWindow;Gallery;Studio;
 [Desktop Action NewWindow]
 Name=New Window
 Name[ru]=Новое окно
-Exec=google-chrome --app="https://ais-pre-ypwd3d2freqhamtros5prz-468670053177.europe-west3.run.app" --class=vangogh-cats-gallery
+Exec=google-chrome --app="http://localhost:3000" --class=vangogh-cats-gallery
 
 [Desktop Action Gallery]
 Name=Gallery
 Name[ru]=Галерея полотен
-Exec=google-chrome --app="https://ais-pre-ypwd3d2freqhamtros5prz-468670053177.europe-west3.run.app" --class=vangogh-cats-gallery
+Exec=google-chrome --app="http://localhost:3000" --class=vangogh-cats-gallery
 
 [Desktop Action Studio]
 Name=AI Studio
 Name[ru]=AI Мастерская
-Exec=google-chrome --app="https://ais-pre-ypwd3d2freqhamtros5prz-468670053177.europe-west3.run.app" --class=vangogh-cats-gallery
+Exec=google-chrome --app="http://localhost:3000" --class=vangogh-cats-gallery

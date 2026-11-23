@@ -2,16 +2,29 @@
 import { Artwork, CatProfile, StorageNodeQuota } from '../types';
 
 const DB_NAME = 'VanGoghCatsP2PDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_MY_CREATIONS = 'my_creations';
 const STORE_FRIEND_BACKUPS = 'friend_backups';
 const STORE_CAT_PROFILES = 'cat_profiles';
+const STORE_CRYPTO_KEYS = 'crypto_keys';
 
 export const TOTAL_8GB_BYTES = 8000000000;
 export const OWN_QUOTA_BYTES = 1600000000; // 1.6 GB
 export const FRIEND_QUOTA_BYTES = 6400000000; // 6.4 GB (4 friends x 1.6 GB)
 
+export interface StoredCryptoKeyRecord {
+  id: string;
+  algorithm: string;
+  publicKeyJwk: JsonWebKey;
+  privateKeyJwk: JsonWebKey;
+  fingerprint: string;
+  createdAt: number;
+}
+
 function openDB(): Promise<IDBDatabase> {
+  if (typeof indexedDB === 'undefined') {
+    return Promise.reject(new Error('IndexedDB unavailable'));
+  }
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
@@ -26,11 +39,44 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_CAT_PROFILES)) {
         db.createObjectStore(STORE_CAT_PROFILES, { keyPath: 'id' });
       }
+      if (!db.objectStoreNames.contains(STORE_CRYPTO_KEYS)) {
+        db.createObjectStore(STORE_CRYPTO_KEYS, { keyPath: 'id' });
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+export async function saveCryptoKeyPair(record: StoredCryptoKeyRecord): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_CRYPTO_KEYS, 'readwrite');
+      tx.objectStore(STORE_CRYPTO_KEYS).put(record);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    if (typeof indexedDB !== 'undefined') {
+      console.warn('Failed to save crypto key pair to IndexedDB:', err);
+    }
+  }
+}
+
+export async function getCryptoKeyPair(id: string): Promise<StoredCryptoKeyRecord | null> {
+  try {
+    const db = await openDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_CRYPTO_KEYS, 'readonly');
+      const request = tx.objectStore(STORE_CRYPTO_KEYS).get(id);
+      request.onsuccess = () => resolve((request.result as StoredCryptoKeyRecord) || null);
+      request.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
 }
 
 // Cat Passports
@@ -86,7 +132,7 @@ export async function getStorageQuotaDetails(): Promise<StorageNodeQuota> {
       friendsReservedBytes: FRIEND_QUOTA_BYTES,
       ownUsedBytes: ownBytes,
       friendsUsedBytes: friendBytes,
-      activeCustodiansCount: Math.min(4, Math.max(1, friendPeers.size)),
+      activeCustodiansCount: Math.min(4, friendPeers.size),
       wholeFilesCount: ownWorks.length + friendWorks.length
     };
   } catch {
@@ -94,10 +140,10 @@ export async function getStorageQuotaDetails(): Promise<StorageNodeQuota> {
       totalCapacityBytes: TOTAL_8GB_BYTES,
       ownReservedBytes: OWN_QUOTA_BYTES,
       friendsReservedBytes: FRIEND_QUOTA_BYTES,
-      ownUsedBytes: 35000000,
-      friendsUsedBytes: 120000000,
-      activeCustodiansCount: 4,
-      wholeFilesCount: 16
+      ownUsedBytes: 0,
+      friendsUsedBytes: 0,
+      activeCustodiansCount: 0,
+      wholeFilesCount: 0
     };
   }
 }
@@ -171,7 +217,7 @@ export async function calculateStorageUsage(): Promise<{ usedBytes: number; appr
   } catch {
     // fallback
   }
-  return { usedBytes: 2500000, approximateMB: '2.5 МБ' };
+  return { usedBytes: 0, approximateMB: '0.0 МБ' };
 }
 
 // Delete authored publication permanently from storage

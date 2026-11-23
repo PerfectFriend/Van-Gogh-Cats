@@ -1,5 +1,17 @@
-import React, { useState } from 'react';
-import { User, Shield, Key, Lock, Download, Trash2, PlusCircle, CheckCircle2, Eye, EyeOff, AlertTriangle, Sparkles, Copy, Award, Smartphone } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import {
+  Shield,
+  Key,
+  Lock,
+  Download,
+  Upload,
+  Trash2,
+  PlusCircle,
+  CheckCircle2,
+  AlertTriangle,
+  Award,
+  FileLock2,
+} from 'lucide-react';
 import { StoredUserProfile, Artwork } from '../types';
 import {
   getAllProfiles,
@@ -7,8 +19,9 @@ import {
   setActiveProfileId,
   deleteProfile,
   exportProfileArchive,
+  exportEncryptedProfileArchive,
+  decryptEncryptedProfileArchive,
   verifyProfilePin,
-  updateProfile,
 } from '../utils/profileManager';
 import { ProfileLimitModal } from './ProfileLimitModal';
 import { OnboardingModal } from './OnboardingModal';
@@ -27,11 +40,19 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
   onOpenCatPassport,
 }) => {
   const [profiles, setProfiles] = useState<StoredUserProfile[]>(getAllProfiles());
-  const [showSeedPinModal, setShowSeedPinModal] = useState(false);
-  const [enteredPin, setEnteredPin] = useState('');
-  const [pinError, setPinError] = useState<string | null>(null);
-  const [isSeedRevealed, setIsSeedRevealed] = useState(false);
-  const [copiedSeed, setCopiedSeed] = useState(false);
+
+  // Encrypted backup export/import states
+  const [showEncExportModal, setShowEncExportModal] = useState(false);
+  const [encPassphrase, setEncPassphrase] = useState('');
+  const [encOptionalSeed, setEncOptionalSeed] = useState('');
+  const [encError, setEncError] = useState<string | null>(null);
+  const [encLoading, setEncLoading] = useState(false);
+
+  const importFileRef = useRef<HTMLInputElement | null>(null);
+  const [pendingImportJson, setPendingImportJson] = useState<string | null>(null);
+  const [importPassphrase, setImportPassphrase] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importedSeedResult, setImportedSeedResult] = useState<string | null>(null);
 
   // Modals for adding profile
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -43,8 +64,12 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
   const [switchPin, setSwitchPin] = useState('');
   const [switchError, setSwitchError] = useState<string | null>(null);
 
-  // Notice
+  // Inline delete confirmation (no window.confirm/alert)
+  const [deletingCandidate, setDeletingCandidate] = useState<StoredUserProfile | null>(null);
+
+  // Notice & Warning
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
+  const [warningNotice, setWarningNotice] = useState<string | null>(null);
 
   const refreshProfiles = () => {
     const list = getAllProfiles();
@@ -53,32 +78,71 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
     if (active) onProfileChanged(active);
   };
 
-  const handleRevealSeedWithPin = async () => {
-    if (currentProfile.pinHash) {
-      const valid = await verifyProfilePin(currentProfile, enteredPin);
-      if (!valid) {
-        setPinError('Неверный PIN-код');
-        return;
-      }
-    }
-    setPinError(null);
-    setShowSeedPinModal(false);
-    setIsSeedRevealed(true);
-    setEnteredPin('');
-  };
-
-  const handleCopySeed = () => {
-    if (currentProfile.seedPhrase && navigator.clipboard) {
-      navigator.clipboard.writeText(currentProfile.seedPhrase);
-      setCopiedSeed(true);
-      setTimeout(() => setCopiedSeed(false), 3000);
-    }
-  };
-
-  const handleExport = (profile: StoredUserProfile) => {
+  const handleExportPublicArchive = (profile: StoredUserProfile) => {
     exportProfileArchive(profile, artworks);
-    setFeedbackNotice(`Архив профиля «${profile.name}» успешно скачан на ваш диск`);
+    setFeedbackNotice(`Публичный архив картин и профиля «${profile.name}» (.catpack.json) скачан без приватных ключей.`);
     setTimeout(() => setFeedbackNotice(null), 5000);
+  };
+
+  const handleEncryptedExportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEncError(null);
+    if (encPassphrase.length < 6) {
+      setEncError('Придумайте надёжный пароль длиной минимум 6 символов.');
+      return;
+    }
+    setEncLoading(true);
+    try {
+      await exportEncryptedProfileArchive(
+        currentProfile,
+        artworks,
+        encPassphrase,
+        encOptionalSeed.trim() || undefined
+      );
+      setShowEncExportModal(false);
+      setEncPassphrase('');
+      setEncOptionalSeed('');
+      setFeedbackNotice(`Зашифрованный архив «${currentProfile.name}» (.catpack.enc.json) сохранён.`);
+      setTimeout(() => setFeedbackNotice(null), 5000);
+    } catch (err: any) {
+      setEncError(err?.message || 'Ошибка шифрования архива.');
+    } finally {
+      setEncLoading(false);
+    }
+  };
+
+  const handleSelectEncryptedFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPendingImportJson(String(reader.result || ''));
+      setImportPassphrase('');
+      setImportError(null);
+      setImportedSeedResult(null);
+    };
+    reader.readAsText(file);
+    if (importFileRef.current) importFileRef.current.value = '';
+  };
+
+  const handleDecryptArchiveSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingImportJson) return;
+    setImportError(null);
+    try {
+      const payload = await decryptEncryptedProfileArchive(pendingImportJson, importPassphrase);
+      if (payload.optionalSeedPhrase) {
+        setImportedSeedResult(payload.optionalSeedPhrase);
+      } else {
+        setPendingImportJson(null);
+      }
+      setFeedbackNotice(
+        `Архив «${payload.profile.name}» успешно расшифрован (${payload.artworksCount} картин). Используйте фразу для восстановления профиля при необходимости.`
+      );
+      setTimeout(() => setFeedbackNotice(null), 6000);
+    } catch {
+      setImportError('Неверный пароль или повреждённый зашифрованный архив.');
+    }
   };
 
   const handlePromptAddProfile = (mode: 'create' | 'restore') => {
@@ -115,15 +179,23 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
     refreshProfiles();
   };
 
-  const handleDeleteCurrentOrSelected = (profile: StoredUserProfile) => {
+  const handleRequestDelete = (profile: StoredUserProfile) => {
     if (profiles.length <= 1) {
-      alert('Нельзя удалить единственный профиль. Создайте второй профиль перед удалением текущего.');
+      setWarningNotice('Нельзя удалить единственный профиль на устройстве. Сначала создайте или восстановите второй профиль.');
+      setTimeout(() => setWarningNotice(null), 5000);
       return;
     }
-    if (confirm(`Удалить профиль «${profile.name}» с этого устройства? Рекомендуется предварительно экспортировать архив.`)) {
-      deleteProfile(profile.id);
-      refreshProfiles();
-    }
+    setDeletingCandidate(profile);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!deletingCandidate) return;
+    const deletedName = deletingCandidate.name;
+    deleteProfile(deletingCandidate.id);
+    setDeletingCandidate(null);
+    refreshProfiles();
+    setFeedbackNotice(`Профиль «${deletedName}» удалён с устройства.`);
+    setTimeout(() => setFeedbackNotice(null), 4000);
   };
 
   const userArtworksCount = artworks.filter(
@@ -145,7 +217,7 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
               Профили, Ключи и BIP-39 Vault
             </h1>
             <p className="text-xs sm:text-sm text-cyan-200/80 font-cyber">
-              Управление профилями (до 3 на устройстве), сид-фразы, PIN-коды и экспорт архивов
+              Управление профилями (до 3 на устройстве), PIN-защита PBKDF2 и шифрование бэкапов AES-GCM
             </p>
           </div>
         </div>
@@ -176,11 +248,16 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
         </div>
       )}
 
-      {/* Grid: Active Profile Card & Multi-Profile List */}
+      {warningNotice && (
+        <div className="p-4 rounded-2xl bg-amber-950/60 border border-amber-500/50 text-amber-200 text-xs sm:text-sm flex items-center gap-3 animate-in fade-in">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+          <span>{warningNotice}</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Col 1 & 2: Active Profile Deep Details */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Active Profile Info Card */}
           <div className="p-6 sm:p-8 rounded-3xl bg-[#0a0f2b]/90 border border-amber-500/40 shadow-xl space-y-6">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="flex items-center gap-4">
@@ -200,19 +277,30 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
-                  onClick={() => handleExport(currentProfile)}
-                  className="py-2 px-3.5 rounded-xl bg-indigo-900/60 hover:bg-indigo-800 border border-indigo-700 text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition-all"
-                  title="Экспорт полного архива профиля и картин"
+                  onClick={() => handleExportPublicArchive(currentProfile)}
+                  className="py-2 px-3.5 rounded-xl bg-indigo-900/60 hover:bg-indigo-800 border border-indigo-700 text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Скачать публичный архив картин (.catpack.json)"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Экспорт в архив</span>
+                  <span>Экспорт картин</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setEncError(null);
+                    setShowEncExportModal(true);
+                  }}
+                  className="py-2 px-3.5 rounded-xl bg-emerald-900/50 hover:bg-emerald-800/70 border border-emerald-600/60 text-emerald-200 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <FileLock2 className="w-4 h-4 text-emerald-400" />
+                  <span>Зашифрованный бэкап</span>
                 </button>
 
                 <button
                   onClick={onOpenCatPassport}
-                  className="py-2 px-3.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                  className="py-2 px-3.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-200 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
                 >
                   <Award className="w-4 h-4 text-amber-400" />
                   <span>Паспорт кота</span>
@@ -220,13 +308,11 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
               </div>
             </div>
 
-            {/* Profile Bio */}
             <div className="p-4 rounded-2xl bg-indigo-950/30 border border-indigo-900/60 text-xs sm:text-sm text-slate-300">
               <span className="text-cyan-400 font-cyber block mb-1">Творческий статус / Био:</span>
               <p className="italic">«{currentProfile.bio}»</p>
             </div>
 
-            {/* Profile Stats */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div className="p-3.5 rounded-2xl bg-indigo-950/40 border border-indigo-900/60 text-center">
                 <p className="text-[11px] text-cyan-300/70 font-cyber">Авторских картин</p>
@@ -236,90 +322,54 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
               <div className="p-3.5 rounded-2xl bg-indigo-950/40 border border-indigo-900/60 text-center">
                 <p className="text-[11px] text-cyan-300/70 font-cyber">Тип кошелька</p>
                 <p className="text-sm font-bold text-emerald-300">
-                  {currentProfile.hasBip39Wallet ? 'BIP-39 (12 слов)' : 'Локальный ключ'}
+                  {currentProfile.hasBip39Wallet ? 'BIP-39 (без хранения сида)' : 'Локальный ключ'}
                 </p>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-indigo-950/40 border border-indigo-900/60 text-center col-span-2 sm:col-span-1">
                 <p className="text-[11px] text-cyan-300/70 font-cyber">Защита PIN-кодом</p>
                 <p className="text-sm font-bold text-amber-300">
-                  {currentProfile.pinHash ? 'Включена (4 цифры)' : 'Не установлена'}
+                  {currentProfile.pinHash ? 'PBKDF2-SHA256 (100k)' : 'Не установлена'}
                 </p>
               </div>
             </div>
 
-            {/* BIP-39 Seed Vault Section */}
+            {/* Zero-Retention Seed Policy & Encrypted Backup Vault */}
             <div className="p-5 rounded-2xl bg-slate-900/80 border border-indigo-800/80 space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-2">
-                  <Key className="w-5 h-5 text-amber-400" />
+                  <Lock className="w-5 h-5 text-emerald-400" />
                   <h3 className="text-sm font-bold text-slate-200">
-                    Секретная Seed-фраза восстановления (BIP-39)
+                    Политика Zero-Retention и шифрованный архив (.catpack.enc.json)
                   </h3>
                 </div>
-
-                {isSeedRevealed && (
-                  <button
-                    onClick={() => setIsSeedRevealed(false)}
-                    className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1"
-                  >
-                    <EyeOff className="w-3.5 h-3.5" />
-                    <span>Скрыть</span>
-                  </button>
-                )}
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".json,.enc.json"
+                  onChange={handleSelectEncryptedFile}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => importFileRef.current?.click()}
+                  className="py-1.5 px-3 rounded-lg bg-indigo-900/70 hover:bg-indigo-800 border border-indigo-700 text-xs font-semibold text-cyan-200 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 text-cyan-300" />
+                  <span>Расшифровать бэкап</span>
+                </button>
               </div>
 
-              {currentProfile.seedPhrase ? (
-                isSeedRevealed ? (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                      {currentProfile.seedPhrase.split(' ').map((word, idx) => (
-                        <div
-                          key={idx}
-                          className="p-2 rounded-xl bg-indigo-950 border border-indigo-800 flex items-center gap-2 font-mono text-xs"
-                        >
-                          <span className="text-[10px] text-cyan-400/60 font-bold">{idx + 1}.</span>
-                          <span className="text-amber-300 font-semibold">{word}</span>
-                        </div>
-                      ))}
-                    </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Для защиты приватности ваша мнемоника BIP-39 <strong>никогда не сохраняется на устройстве</strong> и не включается в открытые экспорты. Если вам нужен цифровой бэкап, используйте кнопку «Зашифрованный бэкап» с надёжным паролем (PBKDF2 600 000 итераций + AES-GCM-256).
+              </p>
 
-                    <div className="flex items-center justify-between gap-3 pt-2">
-                      <p className="text-[11px] text-amber-200/80">
-                        Никому не сообщайте эту мнемоническую фразу!
-                      </p>
-                      <button
-                        onClick={handleCopySeed}
-                        className="py-1.5 px-3 rounded-lg bg-indigo-900 hover:bg-indigo-800 text-xs font-semibold text-cyan-200 flex items-center gap-1"
-                      >
-                        {copiedSeed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedSeed ? 'Скопировано!' : 'Копировать'}</span>
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-indigo-950/60 border border-indigo-900/60">
-                    <div className="flex items-center gap-3">
-                      <Lock className="w-5 h-5 text-cyan-400" />
-                      <span className="text-xs text-slate-300">
-                        Фраза зашифрована и скрыта в целях безопасности.
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => setShowSeedPinModal(true)}
-                      className="py-2 px-4 rounded-xl bg-indigo-900 hover:bg-indigo-800 border border-indigo-700 text-amber-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Показать фразу (ввести PIN)</span>
-                    </button>
-                  </div>
-                )
-              ) : (
-                <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-300/90 flex items-center justify-between gap-3">
-                  <span>Данный профиль создан без мнемоники BIP-39. Рекомендуется создать современный профиль по протоколу BIP-39.</span>
+              {!currentProfile.hasBip39Wallet && (
+                <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-300/90 flex items-center justify-between gap-3">
+                  <span>Данный профиль создан без мнемоники BIP-39. Рекомендуется создать новый профиль по протоколу BIP-39.</span>
                   <button
                     onClick={() => handlePromptAddProfile('create')}
-                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shrink-0"
+                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shrink-0 cursor-pointer"
                   >
                     Создать BIP-39
                   </button>
@@ -342,10 +392,9 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
             </div>
 
             <p className="text-xs text-cyan-200/70 font-cyber">
-              Вы можете переключаться между 3 кошачьими аккаунтами на одном компьютере или телефоне.
+              Вы можете переключаться между 3 кошачьими аккаунтами на одном устройстве.
             </p>
 
-            {/* List of 3 profiles */}
             <div className="space-y-3">
               {profiles.map((p) => {
                 const isCurrent = p.id === currentProfile.id;
@@ -388,16 +437,16 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
 
                     <div className="mt-3 pt-3 border-t border-indigo-950 flex items-center justify-between text-xs">
                       <button
-                        onClick={() => handleExport(p)}
-                        className="text-amber-300 hover:text-amber-200 flex items-center gap-1"
+                        onClick={() => handleExportPublicArchive(p)}
+                        className="text-amber-300 hover:text-amber-200 flex items-center gap-1 cursor-pointer"
                       >
                         <Download className="w-3.5 h-3.5" />
                         <span>Экспорт</span>
                       </button>
 
                       <button
-                        onClick={() => handleDeleteCurrentOrSelected(p)}
-                        className="text-rose-400 hover:text-rose-300 flex items-center gap-1"
+                        onClick={() => handleRequestDelete(p)}
+                        className="text-rose-400 hover:text-rose-300 flex items-center gap-1 cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                         <span>Удалить слот</span>
@@ -408,7 +457,6 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
               })}
             </div>
 
-            {/* Profile Slot status */}
             {profiles.length < 3 ? (
               <button
                 onClick={() => handlePromptAddProfile('create')}
@@ -426,45 +474,151 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
         </div>
       </div>
 
-      {/* Modal: Reveal Seed PIN Dialog */}
-      {showSeedPinModal && (
+      {/* Modal: Encrypted Archive Export */}
+      {showEncExportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="max-w-md w-full bg-[#0a0f2b] border border-amber-500/40 rounded-3xl p-6 space-y-4 shadow-2xl text-slate-100">
+          <form
+            onSubmit={handleEncryptedExportSubmit}
+            className="max-w-md w-full bg-[#0a0f2b] border border-emerald-500/40 rounded-3xl p-6 space-y-4 shadow-2xl text-slate-100"
+          >
             <div className="flex items-center gap-3">
-              <Lock className="w-6 h-6 text-amber-400" />
-              <h3 className="text-lg font-bold text-slate-100">Подтвердите PIN-код</h3>
+              <FileLock2 className="w-6 h-6 text-emerald-400" />
+              <h3 className="text-lg font-bold text-slate-100">Зашифрованный бэкап AES-GCM</h3>
             </div>
             <p className="text-xs text-slate-300">
-              Для отображения секретной мнемоники введите ваш PIN-код:
+              Файл будет зашифрован вашим паролем (PBKDF2 600 000 итераций). Без пароля расшифровать его невозможно.
             </p>
-            <input
-              type="password"
-              maxLength={6}
-              value={enteredPin}
-              onChange={(e) => {
-                setEnteredPin(e.target.value.replace(/\D/g, ''));
-                setPinError(null);
-              }}
-              placeholder="••••"
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-indigo-700 text-center text-lg tracking-widest text-amber-300 focus:outline-none focus:border-amber-400"
-            />
-            {pinError && <p className="text-xs text-rose-400">{pinError}</p>}
+            <div>
+              <label className="text-xs text-cyan-300 block mb-1">Пароль шифрования (мин. 6 символов):</label>
+              <input
+                type="password"
+                value={encPassphrase}
+                onChange={(e) => setEncPassphrase(e.target.value)}
+                placeholder="Надёжный пароль..."
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-indigo-700 text-sm text-amber-200 focus:outline-none focus:border-emerald-400"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-cyan-300 block mb-1">
+                Опционально: вложить 12 слов BIP-39 внутрь шифрофайла (с бумаги):
+              </label>
+              <textarea
+                rows={2}
+                value={encOptionalSeed}
+                onChange={(e) => setEncOptionalSeed(e.target.value)}
+                placeholder="Оставьте пустым для бэкапа только картин и профиля"
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-indigo-700 text-xs font-mono text-amber-200 focus:outline-none focus:border-emerald-400"
+              />
+            </div>
+            {encError && <p className="text-xs text-rose-400">{encError}</p>}
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
+                type="button"
                 onClick={() => {
-                  setShowSeedPinModal(false);
-                  setEnteredPin('');
-                  setPinError(null);
+                  setShowEncExportModal(false);
+                  setEncPassphrase('');
+                  setEncOptionalSeed('');
                 }}
-                className="py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300"
+                className="py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 cursor-pointer"
               >
                 Отмена
               </button>
               <button
-                onClick={handleRevealSeedWithPin}
-                className="py-2 px-5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs"
+                type="submit"
+                disabled={encLoading}
+                className="py-2 px-5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs cursor-pointer"
               >
-                Показать
+                {encLoading ? 'Шифрование...' : 'Скачать .catpack.enc.json'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal: Decrypt Imported Backup */}
+      {pendingImportJson && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <form
+            onSubmit={handleDecryptArchiveSubmit}
+            className="max-w-md w-full bg-[#0a0f2b] border border-cyan-500/40 rounded-3xl p-6 space-y-4 shadow-2xl text-slate-100"
+          >
+            <div className="flex items-center gap-3">
+              <Key className="w-6 h-6 text-cyan-400" />
+              <h3 className="text-lg font-bold text-slate-100">Расшифровка бэкапа</h3>
+            </div>
+            {!importedSeedResult ? (
+              <>
+                <input
+                  type="password"
+                  value={importPassphrase}
+                  onChange={(e) => setImportPassphrase(e.target.value)}
+                  placeholder="Введите пароль архива..."
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-indigo-700 text-sm text-amber-200 focus:outline-none focus:border-cyan-400"
+                />
+                {importError && <p className="text-xs text-rose-400">{importError}</p>}
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPendingImportJson(null)}
+                    className="py-2 px-4 rounded-xl bg-slate-800 text-xs text-slate-300 cursor-pointer"
+                  >
+                    Закрыть
+                  </button>
+                  <button
+                    type="submit"
+                    className="py-2 px-5 rounded-xl bg-cyan-400 text-slate-950 font-bold text-xs cursor-pointer"
+                  >
+                    Расшифровать
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-emerald-300">Восстановленная фраза из зашифрованного архива:</p>
+                <div className="p-3 rounded-xl bg-slate-900 border border-emerald-500/40 font-mono text-xs text-amber-200 select-all">
+                  {importedSeedResult}
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingImportJson(null);
+                      setImportedSeedResult(null);
+                    }}
+                    className="py-2 px-5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs cursor-pointer"
+                  >
+                    Готово
+                  </button>
+                </div>
+              </>
+            )}
+          </form>
+        </div>
+      )}
+
+      {/* Modal: Inline Delete Profile Confirmation */}
+      {deletingCandidate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="max-w-md w-full bg-[#0a0f2b] border border-rose-500/40 rounded-3xl p-6 space-y-4 shadow-2xl text-slate-100">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-6 h-6 text-rose-400" />
+              <h3 className="text-lg font-bold text-slate-100">Удалить профиль «{deletingCandidate.name}»?</h3>
+            </div>
+            <p className="text-xs text-slate-300">
+              Слот на устройстве будет удалён без возможности отмены. Рекомендуется предварительно сохранить архив на диск.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={() => setDeletingCandidate(null)}
+                className="py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 cursor-pointer"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="py-2 px-5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs cursor-pointer"
+              >
+                Удалить слот
               </button>
             </div>
           </div>
@@ -501,13 +655,13 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
                   setSwitchPin('');
                   setSwitchError(null);
                 }}
-                className="py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300"
+                className="py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 cursor-pointer"
               >
                 Отмена
               </button>
               <button
                 onClick={handleConfirmSwitchWithPin}
-                className="py-2 px-5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs"
+                className="py-2 px-5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs cursor-pointer"
               >
                 Войти
               </button>
@@ -516,7 +670,6 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
         </div>
       )}
 
-      {/* Onboarding Modal for Creating or Restoring */}
       <OnboardingModal
         isOpen={showOnboarding}
         initialMode={onboardingMode}
@@ -531,7 +684,6 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
         }}
       />
 
-      {/* Profile Limit Modal if limit 3 reached */}
       <ProfileLimitModal
         isOpen={showLimitModal}
         profiles={profiles}

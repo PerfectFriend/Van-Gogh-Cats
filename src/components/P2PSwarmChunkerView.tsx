@@ -78,9 +78,9 @@ export const P2PSwarmChunkerView: React.FC<P2PSwarmChunkerViewProps> = ({
     }
   };
 
-  // Simulate Swarm P2P Downloading
+  // Simulate Swarm P2P Downloading (local Merkle simulation)
   const handleStartSwarmDownload = () => {
-    if (!session || isDownloading) return;
+    if (!session || !activeArtwork || isDownloading) return;
     setIsDownloading(true);
 
     let currentIndex = 1;
@@ -149,7 +149,7 @@ export const P2PSwarmChunkerView: React.FC<P2PSwarmChunkerViewProps> = ({
 
   // Self-heal corrupted chunk from another peer
   const handleHealChunk = async () => {
-    if (!session || corruptedChunkIndex === null) return;
+    if (!session || !activeArtwork || corruptedChunkIndex === null) return;
     const targetIdx = corruptedChunkIndex;
     
     // Re-fetch clean chunk from activeArtwork
@@ -182,16 +182,19 @@ export const P2PSwarmChunkerView: React.FC<P2PSwarmChunkerViewProps> = ({
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-amber-800/30 pb-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="p-1.5 rounded-lg bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
               <Boxes className="w-5 h-5" />
             </span>
             <h3 className="text-xl font-serif font-bold text-amber-100">
-              Swarm Chunking & Merkle Root (BitTorrent-подобное дробление полотен)
+              Swarm Chunking & Merkle Root
             </h3>
+            <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-slate-900 border border-amber-700/50 text-amber-300">
+              Локальная симуляция роя (демо Merkle-проверки) + Реальный WebRTC
+            </span>
           </div>
           <p className="text-sm text-amber-300/80 mt-1">
-            Разбивка крупноформатных картин на 48 КБ блоки с параллельной скачкой от друзей-пиров и верификацией дерева Меркла
+            Интерактивная демонстрация проверки дерева Меркла на чанках по 48 КБ и реальная передача файлов через WebRTC DataChannel во вкладке «Прямой WebRTC стриминг».
           </p>
         </div>
 
@@ -279,7 +282,7 @@ export const P2PSwarmChunkerView: React.FC<P2PSwarmChunkerViewProps> = ({
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-500 hover:to-amber-500 text-amber-950 font-bold text-xs shadow-md transition-all disabled:opacity-50"
             >
               <Play className="w-3.5 h-3.5" />
-              <span>{isDownloading ? 'Идёт скачка из роя...' : progressPercent === 100 ? 'Холст собран!' : 'Запустить Swarm Download'}</span>
+              <span>{isDownloading ? 'Симуляция скачки...' : progressPercent === 100 ? 'Холст собран!' : 'Запустить симуляцию роя'}</span>
             </button>
 
             <button
@@ -466,7 +469,7 @@ export const P2PSwarmChunkerView: React.FC<P2PSwarmChunkerViewProps> = ({
           <div className="p-3.5 rounded-xl bg-amber-950/50 border border-amber-800/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="space-y-1">
               <div className="text-xs font-bold text-amber-200">
-                Передать полотно «{activeArtwork.title}» напрямую другу:
+                Передать полотно «{activeArtwork?.title || 'Холст'}» напрямую другу:
               </div>
               <div className="text-[11px] text-amber-300/60">
                 Данные изображения транслируются по чанкам с автоматической взаимной репликацией в IndexedDB получателя.

@@ -47,13 +47,13 @@ test('BIP-39 Mnemonic Generation & Validation', async (t) => {
   await t.test('rejects mnemonic with altered checksum / scrambled order', async () => {
     const mnemonic = await generateBip39Mnemonic();
     const words = mnemonic.split(' ');
-    // Swap first two words to break checksum
-    const scrambled = [words[1], words[0], ...words.slice(2)].join(' ');
-    if (words[0] !== words[1]) {
-      const res = await validateBip39Mnemonic(scrambled);
-      assert.strictEqual(res.valid, false);
-      assert.ok(res.error?.includes('Контрольная сумма'));
-    }
+    // Deterministically alter the 4-bit checksum embedded in the last word (XOR bottom 4 bits)
+    const lastIdx = BIP39_WORDLIST.indexOf(words[11]);
+    const alteredLastWord = BIP39_WORDLIST[lastIdx ^ 1];
+    const invalidMnemonic = [...words.slice(0, 11), alteredLastWord].join(' ');
+    const res = await validateBip39Mnemonic(invalidMnemonic);
+    assert.strictEqual(res.valid, false);
+    assert.ok(res.error?.includes('Контрольная сумма'));
   });
 
   await t.test('hashPinCode produces consistent SHA-256 digest', async () => {

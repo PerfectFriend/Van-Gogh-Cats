@@ -42,10 +42,10 @@ export const ProUpgradeModal: React.FC<ProUpgradeModalProps> = ({
             <Crown className="w-9 h-9 fill-current" />
           </div>
           <h2 className="text-2xl sm:text-3xl font-gaudi font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-yellow-200 to-cyan-300 flex items-center justify-center gap-2">
-            <span>Музейный Патронат PRO</span>
+            <span>Режим галереи без рекламы</span>
           </h2>
           <p className="text-xs sm:text-sm text-cyan-200/80 max-w-sm mx-auto font-sans">
-            Поддержите децентрализованную P2P-галерею живописи и откройте безупречный музейный опыт без рекламы
+            Бесплатный локальный переключатель интерфейса (демо без оплаты): скрывает демонстрационные вставки и добавляет значок мецената на этом устройстве.
           </p>
         </div>
 
@@ -56,8 +56,8 @@ export const ProUpgradeModal: React.FC<ProUpgradeModalProps> = ({
               <Check className="w-4 h-4 text-cyan-300" />
             </div>
             <div>
-              <h4 className="text-xs font-bold text-cyan-200 font-cyber">100% Отключение всей спонсорской рекламы</h4>
-              <p className="text-[11px] text-slate-300/80 font-sans">Никаких баннеров и вставок корма в ленте картин и модальных окнах.</p>
+              <h4 className="text-xs font-bold text-cyan-200 font-cyber">Скрытие спонсорских карточек в ленте</h4>
+              <p className="text-[11px] text-slate-300/80 font-sans">Чистая экспозиция картин на вашем экране без рекламных вставок.</p>
             </div>
           </div>
 
@@ -66,8 +66,8 @@ export const ProUpgradeModal: React.FC<ProUpgradeModalProps> = ({
               <Zap className="w-4 h-4 text-yellow-300" />
             </div>
             <div>
-              <h4 className="text-xs font-bold text-yellow-200 font-cyber">Приоритет в P2P-очереди WebRTC</h4>
-              <p className="text-[11px] text-slate-300/80 font-sans">Ускоренная синхронизация шедевров между узлами друзей без задержек.</p>
+              <h4 className="text-xs font-bold text-yellow-200 font-cyber">Локальное оформление PRO</h4>
+              <p className="text-[11px] text-slate-300/80 font-sans">Переключатель не требует банковских карт и хранится только в браузере.</p>
             </div>
           </div>
 
@@ -76,8 +76,8 @@ export const ProUpgradeModal: React.FC<ProUpgradeModalProps> = ({
               <Crown className="w-4 h-4 text-fuchsia-300" />
             </div>
             <div>
-              <h4 className="text-xs font-bold text-fuchsia-200 font-cyber">Золотой знак «Меценат Музея»</h4>
-              <p className="text-[11px] text-slate-300/80 font-sans">Особый золотой бейдж в профиле пира и повышенный авторитет в жюри аудиторов.</p>
+              <h4 className="text-xs font-bold text-fuchsia-200 font-cyber">Знак «Меценат Музея»</h4>
+              <p className="text-[11px] text-slate-300/80 font-sans">Декоративный золотой бейдж в вашем локальном профиле.</p>
             </div>
           </div>
         </div>
@@ -104,7 +104,7 @@ export const ProUpgradeModal: React.FC<ProUpgradeModalProps> = ({
             <div className="space-y-3">
               <div className="flex items-baseline justify-center gap-1">
                 <span className="text-3xl font-bold text-yellow-300 font-gaudi">Бесплатно</span>
-                <span className="text-xs text-cyan-200/70">/ в рамках открытой беты</span>
+                <span className="text-xs text-cyan-200/70">/ локально без оплаты</span>
               </div>
               <button
                 onClick={() => {
@@ -114,10 +114,10 @@ export const ProUpgradeModal: React.FC<ProUpgradeModalProps> = ({
                 className="w-full py-3.5 rounded-2xl cyber-btn-gold text-slate-950 font-bold text-sm flex items-center justify-center gap-2 shadow-xl transition active:scale-95 cursor-pointer font-cyber"
               >
                 <Crown className="w-4 h-4 text-slate-950 fill-current" />
-                <span>Активировать PRO и отключить рекламу</span>
+                <span>Включить локальный режим без рекламы</span>
               </button>
               <p className="text-[10px] text-cyan-300/60 font-mono">
-                Моментальная активация статуса в локальном P2P-хранилище устройства
+                Настройка сохраняется только в localStorage этого устройства
               </p>
             </div>
           )}

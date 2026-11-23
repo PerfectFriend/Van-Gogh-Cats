@@ -64,62 +64,85 @@ export const FirebaseAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [cloudCustomStylePrompt, setCloudCustomStylePrompt] = useState<string>('');
   const [cloudPreferredStyleId, setCloudPreferredStyleId] = useState<string | null>(null);
 
+  const ensureInFlightRef = React.useRef<Map<string, Promise<void>>>(new Map());
+
   const ensureUserDocs = useCallback(async (user: User) => {
     const uid = sanitizeFirestoreId(user.uid, 'user');
-    const userPath = `users/${uid}`;
-    const privatePath = `users/${uid}/private/account`;
+    const existingPromise = ensureInFlightRef.current.get(uid);
+    if (existingPromise) {
+      return existingPromise;
+    }
 
-    try {
-      const userRef = doc(db, 'users', uid);
-      const userSnap = await getDoc(userRef);
-      const displayName = (user.displayName || user.email?.split('@')[0] || 'Cat Artist').slice(0, 100);
-      const photoURL = (user.photoURL || '').slice(0, 500);
+    const run = (async () => {
+      const userPath = `users/${uid}`;
+      const privatePath = `users/${uid}/private/account`;
+      let activePath = userPath;
+      let activeOp = OperationType.WRITE;
 
-      if (!userSnap.exists()) {
-        await setDoc(userRef, {
-          uid,
-          displayName,
-          ...(photoURL ? { photoURL } : {}),
-          bio: 'Персональная облачная галерея котиков',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        const data = userSnap.data();
-        if (typeof data?.customStylePrompt === 'string') {
-          setCloudCustomStylePrompt(data.customStylePrompt);
-        }
-        if (typeof data?.preferredStyleId === 'string') {
-          setCloudPreferredStyleId(data.preferredStyleId);
-        }
-        await updateDoc(userRef, {
-          displayName,
-          ...(photoURL ? { photoURL } : {}),
-          updatedAt: serverTimestamp(),
-        });
-      }
+      try {
+        const userRef = doc(db, 'users', uid);
+        activeOp = OperationType.GET;
+        const userSnap = await getDoc(userRef);
+        const displayName = (user.displayName || user.email?.split('@')[0] || 'Cat Artist').slice(0, 100);
+        const photoURL = (user.photoURL || '').slice(0, 500);
 
-      if (user.email) {
-        const privRef = doc(db, 'users', uid, 'private', 'account');
-        const privSnap = await getDoc(privRef);
-        const email = user.email.slice(0, 200);
-        if (!privSnap.exists()) {
-          await setDoc(privRef, {
+        if (!userSnap.exists()) {
+          activeOp = OperationType.CREATE;
+          await setDoc(userRef, {
             uid,
-            email,
+            displayName,
+            ...(photoURL ? { photoURL } : {}),
+            bio: 'Персональная облачная галерея котиков',
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
         } else {
-          await updateDoc(privRef, {
-            email,
+          const data = userSnap.data();
+          if (typeof data?.customStylePrompt === 'string') {
+            setCloudCustomStylePrompt(data.customStylePrompt);
+          }
+          if (typeof data?.preferredStyleId === 'string') {
+            setCloudPreferredStyleId(data.preferredStyleId);
+          }
+          activeOp = OperationType.UPDATE;
+          await updateDoc(userRef, {
+            displayName,
+            ...(photoURL ? { photoURL } : {}),
             updatedAt: serverTimestamp(),
           });
         }
+
+        if (user.email) {
+          activePath = privatePath;
+          const privRef = doc(db, 'users', uid, 'private', 'account');
+          activeOp = OperationType.GET;
+          const privSnap = await getDoc(privRef);
+          const email = user.email.slice(0, 200);
+          if (!privSnap.exists()) {
+            activeOp = OperationType.CREATE;
+            await setDoc(privRef, {
+              uid,
+              email,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+          } else {
+            activeOp = OperationType.UPDATE;
+            await updateDoc(privRef, {
+              email,
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+      } catch (err) {
+        handleFirestoreError(err, activeOp, activePath);
+      } finally {
+        ensureInFlightRef.current.delete(uid);
       }
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, userPath || privatePath);
-    }
+    })();
+
+    ensureInFlightRef.current.set(uid, run);
+    return run;
   }, []);
 
   useEffect(() => {
@@ -208,12 +231,15 @@ export const FirebaseAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
       return result.user;
     } catch (err: any) {
       const code = err?.code || '';
+      const rawMsg = String(err?.message || '');
       if (code === 'auth/popup-closed-by-user') {
         setAuthError('Окно входа через Google было закрыто до завершения авторизации.');
       } else if (code === 'auth/popup-blocked') {
         setAuthError('Браузер заблокировал всплывающее окно Google. Разрешите pop-up и повторите.');
+      } else if (rawMsg.startsWith('{')) {
+        setAuthError('Аккаунт Google подключён, но синхронизация профиля с облаком требует прав доступа Firestore.');
       } else {
-        setAuthError(err?.message || 'Не удалось выполнить вход через Google.');
+        setAuthError(rawMsg || 'Не удалось выполнить вход через Google.');
       }
       return null;
     } finally {

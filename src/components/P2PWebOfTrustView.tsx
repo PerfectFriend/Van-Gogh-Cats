@@ -13,7 +13,12 @@ import {
   Gavel
 } from 'lucide-react';
 import { ArtistProfile, WebOfTrustProfile, PeerEndorsement, TrustTier, PeerFriend } from '../types';
-import { getLocalWoTProfile, createPeerEndorsement, calculateTrustTier, calculateWoTJuryBonus } from '../utils/p2pWebOfTrust';
+import {
+  getLocalWoTProfile,
+  createPeerEndorsement,
+  getOrCreatePeerEcdsaKeyPair,
+  verifyEndorsementSignature
+} from '../utils/p2pWebOfTrust';
 
 interface P2PWebOfTrustViewProps {
   artistProfile: ArtistProfile;
@@ -30,9 +35,35 @@ export const P2PWebOfTrustView: React.FC<P2PWebOfTrustViewProps> = ({
   const [assignedStars, setAssignedStars] = useState<number>(5);
   const [statementText, setStatementText] = useState<string>('');
   const [endorsingSuccess, setEndorsingSuccess] = useState<string | null>(null);
+  const [keyFingerprint, setKeyFingerprint] = useState<string>(wotProfile.publicKeyFingerprint);
+  const [verifiedSignatures, setVerifiedSignatures] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    setWotProfile(getLocalWoTProfile(artistProfile));
+    const profile = getLocalWoTProfile(artistProfile);
+    setWotProfile(profile);
+
+    let cancelled = false;
+    getOrCreatePeerEcdsaKeyPair()
+      .then((kp) => {
+        if (!cancelled) setKeyFingerprint(kp.fingerprint);
+      })
+      .catch(() => {});
+
+    Promise.all(
+      profile.endorsementsReceived.map(async (e) => ({
+        id: e.id,
+        valid: await verifyEndorsementSignature(e),
+      }))
+    ).then((results) => {
+      if (cancelled) return;
+      const map: Record<string, boolean> = {};
+      for (const r of results) map[r.id] = r.valid;
+      setVerifiedSignatures(map);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [artistProfile]);
 
   const handleEndorseFriend = async (e: React.FormEvent) => {
@@ -49,9 +80,16 @@ export const P2PWebOfTrustView: React.FC<P2PWebOfTrustViewProps> = ({
       statementText.trim()
     );
 
-    // Refresh profile
-    setWotProfile(getLocalWoTProfile(artistProfile));
-    setEndorsingSuccess(`Ключ мастера «${targetFriend.name}» успешно подписан вашим криптографическим сертификатом!`);
+    // Refresh profile and signature verification status
+    const updatedProfile = getLocalWoTProfile(artistProfile);
+    setWotProfile(updatedProfile);
+    const map: Record<string, boolean> = {};
+    for (const item of updatedProfile.endorsementsReceived) {
+      map[item.id] = await verifyEndorsementSignature(item);
+    }
+    setVerifiedSignatures(map);
+
+    setEndorsingSuccess(`Ключ мастера «${targetFriend.name}» подписан вашей криптографической подписью ECDSA P-256!`);
     setStatementText('');
     setIsEndorsingOpen(false);
     setTimeout(() => setEndorsingSuccess(null), 4000);
@@ -127,13 +165,13 @@ export const P2PWebOfTrustView: React.FC<P2PWebOfTrustViewProps> = ({
         <div className="p-4 rounded-xl bg-black/40 border border-amber-800/30 space-y-2">
           <div className="flex items-center gap-1.5 text-xs text-amber-300/70 font-medium">
             <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-            <span>Отпечаток открытого ключа (Ed25519):</span>
+            <span>Отпечаток открытого ключа (ECDSA P-256):</span>
           </div>
           <div className="font-mono text-xs text-amber-200 bg-black/60 p-2 rounded-lg border border-amber-900/40 break-all select-all">
-            {wotProfile.publicKeyFingerprint}
+            {keyFingerprint}
           </div>
           <div className="text-[11px] text-amber-400/60">
-            Подтверждено Web Crypto API на вашем устройстве
+            Стойкая пара ключей хранится локально в IndexedDB (Web Crypto API)
           </div>
         </div>
 
@@ -156,40 +194,56 @@ export const P2PWebOfTrustView: React.FC<P2PWebOfTrustViewProps> = ({
       <div className="space-y-3">
         <div className="flex items-center justify-between text-xs text-amber-300/80 px-1 font-medium">
           <span>Сертификаты доверия, выданные вашему холсту ({wotProfile.endorsementsReceived.length}):</span>
-          <span className="text-amber-400">Криптографически заверено</span>
+          <span className="text-amber-400">Проверка ECDSA P-256 (демо-записи отмечены)</span>
         </div>
 
         <div className="space-y-3">
-          {wotProfile.endorsementsReceived.map((endorsement) => (
-            <div
-              key={endorsement.id}
-              className="p-4 rounded-xl bg-amber-950/30 border border-amber-800/30 space-y-2 hover:border-amber-700/50 transition-colors"
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-sm text-amber-100">{endorsement.endorserName}</span>
-                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-900/40 border border-purple-500/40 text-purple-300">
-                    {endorsement.endorserTier === 'guild_patriarch' ? 'Патриарх' : 'Мастер'}
-                  </span>
+          {wotProfile.endorsementsReceived.map((endorsement) => {
+            const isVerified = verifiedSignatures[endorsement.id] === true;
+            return (
+              <div
+                key={endorsement.id}
+                className="p-4 rounded-xl bg-amber-950/30 border border-amber-800/30 space-y-2 hover:border-amber-700/50 transition-colors"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-sm text-amber-100">{endorsement.endorserName}</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-900/40 border border-purple-500/40 text-purple-300">
+                      {endorsement.endorserTier === 'guild_patriarch' ? 'Патриарх' : 'Мастер'}
+                    </span>
+                    {endorsement.isDemo ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800/90 border border-slate-700 text-slate-300">
+                        Демо-пример гильдии
+                      </span>
+                    ) : isVerified ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/50 text-emerald-300">
+                        ✓ ECDSA P-256 проверена
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-950/80 border border-rose-600/50 text-rose-300">
+                        Подпись не подтверждена
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    {[...Array(endorsement.trustScoreAssigned)].map((_, i) => (
+                      <Star key={i} className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-1">
-                  {[...Array(endorsement.trustScoreAssigned)].map((_, i) => (
-                    <Star key={i} className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />
-                  ))}
+                <p className="text-xs text-amber-200/90 italic font-serif bg-black/20 p-2.5 rounded-lg border border-amber-900/20">
+                  «{endorsement.statement}»
+                </p>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-amber-400/60 pt-1">
+                  <span className="truncate max-w-xs">Подпись: {endorsement.digitalSignature.slice(0, 32)}...</span>
+                  <span className="truncate max-w-xs">Транзакция: {endorsement.txHash.slice(0, 24)}...</span>
                 </div>
               </div>
-
-              <p className="text-xs text-amber-200/90 italic font-serif bg-black/20 p-2.5 rounded-lg border border-amber-900/20">
-                «{endorsement.statement}»
-              </p>
-
-              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-amber-400/60 pt-1">
-                <span>Подпись: {endorsement.digitalSignature}</span>
-                <span>Транзакция: {endorsement.txHash}</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

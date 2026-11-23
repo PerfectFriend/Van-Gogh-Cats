@@ -12,7 +12,7 @@ APP_DIR="${HOME}/.local/share/${APP_ID}"
 APPLICATIONS_DIR="${HOME}/.local/share/applications"
 DESKTOP_DIR="${HOME}/Desktop"
 ICON_DIR="${HOME}/.local/share/icons/hicolor/512x512/apps"
-TARGET_URL="${1:-https://ais-pre-ypwd3d2freqhamtros5prz-468670053177.europe-west3.run.app}"
+TARGET_URL="${1:-${VANGOGH_URL:-http://localhost:3000}}"
 
 echo "🎨 Установка ${APP_NAME} для Ubuntu Linux Desktop..."
 

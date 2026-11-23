@@ -1,6 +1,14 @@
 // Multi-Profile and BIP-39 Vault Manager (Maximum 3 profiles per device)
 import { StoredUserProfile, ArtistProfile, Artwork, SystemPermissionStatus } from '../types';
-import { hashPinCode, generateSalt, mnemonicToSeedHex } from './bip39';
+import {
+  hashPinCode,
+  generateSalt,
+  mnemonicToSeedHex,
+  deriveProfileIdFromSeedHex,
+  encryptWithPassphrase,
+  decryptWithPassphrase,
+  EncryptedPassphrasePayload,
+} from './bip39';
 
 const PROFILES_STORAGE_KEY = 'vangogh_multi_profiles';
 const ACTIVE_PROFILE_ID_KEY = 'vangogh_active_profile_id';
@@ -28,38 +36,59 @@ const CAT_PAINTER_NAMES = [
   'Клод Монемур',
 ];
 
-// Read all stored profiles (up to 3)
+function scrubSensitiveFields(profile: StoredUserProfile & { seedPhrase?: unknown }): StoredUserProfile {
+  const { seedPhrase: _omitted, ...safe } = profile;
+  void _omitted;
+  return safe;
+}
+
+// Read all stored profiles (up to 3), scrubbing any legacy plaintext seedPhrase on read
 export function getAllProfiles(): StoredUserProfile[] {
   try {
     const raw = localStorage.getItem(PROFILES_STORAGE_KEY);
     if (!raw) {
-      // Check legacy single profile if present
       const legacyRaw = localStorage.getItem('vangogh_artist_profile');
       if (legacyRaw) {
         try {
-          const legacy: ArtistProfile = JSON.parse(legacyRaw);
-          const migrated: StoredUserProfile = {
+          const legacy: ArtistProfile & { seedPhrase?: unknown } = JSON.parse(legacyRaw);
+          const migrated: StoredUserProfile = scrubSensitiveFields({
             ...legacy,
             isCurrent: true,
             hasBip39Wallet: false,
-          };
+          });
           saveAllProfiles([migrated]);
           setActiveProfileId(migrated.id);
           return [migrated];
-        } catch {}
+        } catch {
+          return [];
+        }
       }
       return [];
     }
-    const profiles: StoredUserProfile[] = JSON.parse(raw);
-    return Array.isArray(profiles) ? profiles.slice(0, 3) : [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    let hadPlaintextSeed = false;
+    const cleaned = parsed.slice(0, 3).map((item: StoredUserProfile & { seedPhrase?: unknown }) => {
+      if (Object.prototype.hasOwnProperty.call(item, 'seedPhrase') && item.seedPhrase !== undefined) {
+        hadPlaintextSeed = true;
+      }
+      return scrubSensitiveFields(item);
+    });
+
+    if (hadPlaintextSeed) {
+      localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(cleaned));
+    }
+
+    return cleaned;
   } catch {
     return [];
   }
 }
 
-// Save all profiles to localStorage
+// Save all profiles to localStorage (never persisting plaintext seed phrases)
 export function saveAllProfiles(profiles: StoredUserProfile[]): void {
-  const bounded = profiles.slice(0, 3);
+  const bounded = profiles.slice(0, 3).map(scrubSensitiveFields);
   localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(bounded));
 }
 
@@ -106,7 +135,6 @@ export function getActiveProfile(): StoredUserProfile | null {
     if (found) return found;
   }
 
-  // Fallback to first profile marked isCurrent or simply first
   const current = profiles.find(p => p.isCurrent) || profiles[0];
   if (current) {
     setActiveProfileId(current.id);
@@ -129,9 +157,8 @@ export function saveNewProfile(profile: StoredUserProfile): { success: boolean; 
     };
   }
 
-  // Check duplicate ID
   const filtered = existing.filter(p => p.id !== profile.id);
-  const updated = [...filtered, { ...profile, isCurrent: true }];
+  const updated = [...filtered, { ...scrubSensitiveFields(profile), isCurrent: true }];
   saveAllProfiles(updated);
   setActiveProfileId(profile.id);
   return { success: true };
@@ -142,7 +169,7 @@ export function updateProfile(updatedProfile: StoredUserProfile): void {
   const profiles = getAllProfiles();
   const idx = profiles.findIndex(p => p.id === updatedProfile.id);
   if (idx !== -1) {
-    profiles[idx] = updatedProfile;
+    profiles[idx] = scrubSensitiveFields(updatedProfile);
     saveAllProfiles(profiles);
     if (getActiveProfileId() === updatedProfile.id) {
       setActiveProfileId(updatedProfile.id);
@@ -169,13 +196,13 @@ export function deleteProfile(profileId: string): void {
 // Verify PIN code for a profile
 export async function verifyProfilePin(profile: StoredUserProfile, enteredPin: string): Promise<boolean> {
   if (!profile.pinHash || !profile.pinSalt) {
-    return true; // No PIN configured
+    return true;
   }
   const computedHash = await hashPinCode(enteredPin, profile.pinSalt);
   return computedHash === profile.pinHash;
 }
 
-// Create new BIP-39 profile instance
+// Create new BIP-39 profile instance without storing plaintext mnemonic on disk/storage
 export async function createBip39ProfileData(
   seedPhrase: string,
   pin: string,
@@ -184,7 +211,7 @@ export async function createBip39ProfileData(
   customAvatarColor?: string
 ): Promise<StoredUserProfile> {
   const seedHex = await mnemonicToSeedHex(seedPhrase);
-  const idFingerprint = 'cat_' + seedHex.substring(0, 16);
+  const idFingerprint = await deriveProfileIdFromSeedHex(seedHex);
 
   const salt = generateSalt();
   const pinHash = await hashPinCode(pin, salt);
@@ -198,7 +225,6 @@ export async function createBip39ProfileData(
     bio: customBio?.trim() || 'Художник децентрализованной мастерской кошачьего постимпрессионизма (BIP-39 Vault)',
     avatarColor: customAvatarColor || defaultAvatar,
     createdAt: Date.now(),
-    seedPhrase,
     pinHash,
     pinSalt: salt,
     totalCreations: 0,
@@ -208,14 +234,53 @@ export async function createBip39ProfileData(
   };
 }
 
-// Export Profile Archive (.catpack.json) to local disk before deletion or as backup
+export interface ProfileArchivePayload {
+  archiveFormat: 'vangogh-catpack-profile-v3';
+  exportedAt: string;
+  profile: {
+    id: string;
+    name: string;
+    bio: string;
+    avatarColor: string;
+    createdAt: number;
+    totalCreations: number;
+    hasBip39Wallet?: boolean;
+    likedArtworkIds: string[];
+  };
+  optionalSeedPhrase?: string;
+  artworksCount: number;
+  artworks: Artwork[];
+}
+
+export interface EncryptedProfileArchiveFile {
+  archiveFormat: 'vangogh-catpack-encrypted-v1';
+  exportedAt: string;
+  profileId: string;
+  profileName: string;
+  encryptedPayload: EncryptedPassphrasePayload;
+}
+
+function triggerJsonDownload(data: unknown, filename: string): void {
+  if (typeof document === 'undefined') return;
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Export public metadata + artworks (.catpack.json) — never contains plaintext seed phrase
 export function exportProfileArchive(profile: StoredUserProfile, artworks: Artwork[] = []): void {
-  const userArtworks = artworks.filter(a => 
-    a.authorId === profile.id || a.isUserCreated || a.source === 'my-local'
+  const userArtworks = artworks.filter(
+    a => a.authorId === profile.id || a.isUserCreated || a.source === 'my-local'
   );
 
-  const archiveData = {
-    archiveFormat: 'vangogh-catpack-profile-v2',
+  const archiveData: ProfileArchivePayload = {
+    archiveFormat: 'vangogh-catpack-profile-v3',
     exportedAt: new Date().toISOString(),
     profile: {
       id: profile.id,
@@ -225,24 +290,83 @@ export function exportProfileArchive(profile: StoredUserProfile, artworks: Artwo
       createdAt: profile.createdAt,
       totalCreations: profile.totalCreations,
       hasBip39Wallet: profile.hasBip39Wallet,
-      seedPhrase: profile.seedPhrase, // Backup seed
       likedArtworkIds: profile.likedArtworkIds,
     },
     artworksCount: userArtworks.length,
     artworks: userArtworks,
   };
 
-  const jsonStr = JSON.stringify(archiveData, null, 2);
-  const blob = new Blob([jsonStr], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
   const safeName = profile.name.replace(/[^a-zA-Z0-9а-яА-Я_-]/g, '_');
-  a.href = url;
-  a.download = `vangogh-cat-profile-${safeName}-${profile.id.slice(0, 8)}-${Date.now()}.catpack.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  triggerJsonDownload(
+    archiveData,
+    `vangogh-cat-profile-${safeName}-${profile.id.slice(0, 8)}-${Date.now()}.catpack.json`
+  );
+}
+
+// Create encrypted profile archive payload (can optionally wrap a user-supplied mnemonic inside AES-GCM)
+export async function buildEncryptedProfileArchive(
+  profile: StoredUserProfile,
+  artworks: Artwork[],
+  passphrase: string,
+  optionalSeedPhrase?: string
+): Promise<EncryptedProfileArchiveFile> {
+  const userArtworks = artworks.filter(
+    a => a.authorId === profile.id || a.isUserCreated || a.source === 'my-local'
+  );
+
+  const innerPayload: ProfileArchivePayload = {
+    archiveFormat: 'vangogh-catpack-profile-v3',
+    exportedAt: new Date().toISOString(),
+    profile: {
+      id: profile.id,
+      name: profile.name,
+      bio: profile.bio,
+      avatarColor: profile.avatarColor,
+      createdAt: profile.createdAt,
+      totalCreations: profile.totalCreations,
+      hasBip39Wallet: profile.hasBip39Wallet,
+      likedArtworkIds: profile.likedArtworkIds,
+    },
+    ...(optionalSeedPhrase?.trim() ? { optionalSeedPhrase: optionalSeedPhrase.trim() } : {}),
+    artworksCount: userArtworks.length,
+    artworks: userArtworks,
+  };
+
+  const encryptedPayload = await encryptWithPassphrase(JSON.stringify(innerPayload), passphrase);
+
+  return {
+    archiveFormat: 'vangogh-catpack-encrypted-v1',
+    exportedAt: new Date().toISOString(),
+    profileId: profile.id,
+    profileName: profile.name,
+    encryptedPayload,
+  };
+}
+
+export async function exportEncryptedProfileArchive(
+  profile: StoredUserProfile,
+  artworks: Artwork[],
+  passphrase: string,
+  optionalSeedPhrase?: string
+): Promise<void> {
+  const archive = await buildEncryptedProfileArchive(profile, artworks, passphrase, optionalSeedPhrase);
+  const safeName = profile.name.replace(/[^a-zA-Z0-9а-яА-Я_-]/g, '_');
+  triggerJsonDownload(
+    archive,
+    `vangogh-cat-profile-${safeName}-${profile.id.slice(0, 8)}-${Date.now()}.catpack.enc.json`
+  );
+}
+
+export async function decryptEncryptedProfileArchive(
+  jsonText: string,
+  passphrase: string
+): Promise<ProfileArchivePayload> {
+  const parsed = JSON.parse(jsonText) as EncryptedProfileArchiveFile;
+  if (parsed?.archiveFormat !== 'vangogh-catpack-encrypted-v1' || !parsed?.encryptedPayload) {
+    throw new Error('Неподдерживаемый формат зашифрованного архива.');
+  }
+  const plaintext = await decryptWithPassphrase(parsed.encryptedPayload, passphrase);
+  return JSON.parse(plaintext) as ProfileArchivePayload;
 }
 
 // System permissions handling

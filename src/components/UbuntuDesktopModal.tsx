@@ -31,7 +31,7 @@ export const UbuntuDesktopModal: React.FC<UbuntuDesktopModalProps> = ({ isOpen, 
 
   if (!isOpen) return null;
 
-  const currentUrl = typeof window !== 'undefined' ? window.location.href : 'https://ais-pre-ypwd3d2freqhamtros5prz-468670053177.europe-west3.run.app';
+  const currentUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
   const cleanUrl = currentUrl.endsWith('/') ? currentUrl.slice(0, -1) : currentUrl;
 
   const copyToClipboard = (text: string, key: string) => {
@@ -40,9 +40,8 @@ export const UbuntuDesktopModal: React.FC<UbuntuDesktopModalProps> = ({ isOpen, 
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const oneLineCommand = `curl -sSL ${cleanUrl}/install-ubuntu.sh | bash`;
-  const debInstallCmd = `sudo apt install ./vangogh-cats-gallery_latest_all.deb`;
-  const debWgetCmd = `wget ${cleanUrl}/vangogh-cats-gallery_latest_all.deb && sudo apt install ./vangogh-cats-gallery_latest_all.deb`;
+  const oneLineCommand = `curl -sSL ${cleanUrl}/install-ubuntu.sh | bash -s -- "${cleanUrl}"`;
+  const packageBuildCmd = `APP_URL="${cleanUrl}" npm run package:ubuntu && sudo apt install ./dist/packages/vangogh-cats-gallery_latest_all.deb`;
 
   const desktopEntryContent = `[Desktop Entry]
 Version=1.0
@@ -155,7 +154,7 @@ Keywords=VanGogh;Cats;Art;Gallery;AI;Masterpiece;`;
 
         {/* Modal Content */}
         <div className="p-5 sm:p-6 space-y-5 overflow-y-auto text-slate-300 text-sm">
-          {/* TAB 0: Official .deb package */}
+          {/* TAB 0: Local .deb package builder */}
           {activeTab === 'deb' && (
             <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-gradient-to-br from-orange-950/50 via-amber-950/30 to-slate-900 border border-orange-500/40 shadow-inner space-y-3">
@@ -164,33 +163,33 @@ Keywords=VanGogh;Cats;Art;Gallery;AI;Masterpiece;`;
                     <Package className="w-5 h-5 text-amber-400" />
                     <div>
                       <span className="font-bold text-amber-200 text-sm">
-                        Официальный Debian-пакет (.deb)
+                        Сборка Debian-пакета (.deb) из исходников
                       </span>
                       <p className="text-[11px] text-slate-300">
-                        Для Ubuntu 20.04, 22.04, 24.04 LTS и производных дистрибутивов
+                        Для Ubuntu 20.04, 22.04, 24.04 LTS — собирается в dist/packages/
                       </p>
                     </div>
                   </div>
                   <a
-                    href="/vangogh-cats-gallery_latest_all.deb"
-                    download="vangogh-cats-gallery_1.0.0_all.deb"
+                    href="/install-ubuntu.sh"
+                    download="install-ubuntu.sh"
                     className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg transition cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Скачать .DEB (98 КБ)</span>
+                    <span>Скачать install-ubuntu.sh</span>
                   </a>
                 </div>
 
                 <p className="text-xs text-slate-300 leading-relaxed pt-1">
-                  Установите пакет через APT одной командой (автоматически пропишет запуск в GNOME Dash, иконку 512x512 и права):
+                  Соберите и установите пакет .deb одной командой из корня репозитория:
                 </p>
 
                 <div className="relative">
                   <pre className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-emerald-300 font-mono overflow-x-auto leading-relaxed select-all">
-                    {debWgetCmd}
+                    {packageBuildCmd}
                   </pre>
                   <button
-                    onClick={() => copyToClipboard(debWgetCmd, 'deb_wget')}
+                    onClick={() => copyToClipboard(packageBuildCmd, 'deb_wget')}
                     className="absolute top-2 right-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer shadow"
                   >
                     {copiedKey === 'deb_wget' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
@@ -203,35 +202,20 @@ Keywords=VanGogh;Cats;Art;Gallery;AI;Masterpiece;`;
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                 <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-0.5">
                   <span className="text-[10px] text-slate-400 uppercase">Пакет</span>
-                  <p className="font-mono text-amber-300 text-[11px] truncate">vangogh-cats</p>
+                  <p className="font-mono text-amber-300 text-[11px] truncate">vangogh-cats-gallery</p>
                 </div>
                 <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-0.5">
                   <span className="text-[10px] text-slate-400 uppercase">Версия</span>
-                  <p className="font-mono text-emerald-300 text-[11px]">1.0.0-rc</p>
+                  <p className="font-mono text-emerald-300 text-[11px]">1.0.0</p>
                 </div>
                 <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-0.5">
                   <span className="text-[10px] text-slate-400 uppercase">Архитектура</span>
                   <p className="font-mono text-sky-300 text-[11px]">all (x86_64/arm)</p>
                 </div>
                 <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-0.5">
-                  <span className="text-[10px] text-slate-400 uppercase">Размер</span>
-                  <p className="font-mono text-yellow-300 text-[11px]">~98 КБ</p>
+                  <span className="text-[10px] text-slate-400 uppercase">Каталог</span>
+                  <p className="font-mono text-yellow-300 text-[11px]">dist/packages/</p>
                 </div>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700 text-xs flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-amber-400" />
-                  <span className="text-slate-200">Полное руководство пользователя (User Manual):</span>
-                </div>
-                <a
-                  href="/USER_MANUAL.md"
-                  download="USER_MANUAL_UBUNTU.md"
-                  className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-amber-200 font-medium flex items-center gap-1.5 transition text-xs border border-slate-600 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5 text-yellow-400" />
-                  <span>Скачать Manual.md</span>
-                </a>
               </div>
             </div>
           )}
@@ -360,36 +344,35 @@ Keywords=VanGogh;Cats;Art;Gallery;AI;Masterpiece;`;
             </div>
           )}
 
-          {/* TAB 3: User Manual, Tarball & Systemd */}
+          {/* TAB 3: Tarball & Systemd */}
           {activeTab === 'manual' && (
             <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-amber-200 text-xs flex items-center gap-2">
                     <BookOpen className="w-4 h-4 text-amber-400" />
-                    Руководство пользователя и портативный архив
+                    Портативный архив (.tar.gz) и документация (README.md)
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Полная инструкция включает архитектуру, описание P2P-протокола, аудит пигментов, решение проблем и команды для systemd-демона.
+                  Скрипт <code className="text-amber-300">npm run package:ubuntu</code> собирает оба дистрибутива (.deb и .tar.gz) в <code className="text-cyan-300">dist/packages/</code>. Подробная документация находится в <code className="text-amber-300">README.md</code> в корне проекта.
                 </p>
                 <div className="flex flex-wrap gap-2 pt-1">
                   <a
-                    href="/USER_MANUAL.md"
-                    download="USER_MANUAL_UBUNTU.md"
+                    href="/install-ubuntu.sh"
+                    download="install-ubuntu.sh"
                     className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow transition cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Скачать Руководство (USER_MANUAL.md)</span>
+                    <span>Скачать install-ubuntu.sh</span>
                   </a>
-                  <a
-                    href="/vangogh-cats-gallery_latest_linux.tar.gz"
-                    download="vangogh-cats-gallery_1.0.0_linux.tar.gz"
+                  <button
+                    onClick={() => copyToClipboard('npm run package:ubuntu', 'pkg_cmd')}
                     className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-200 border border-slate-600 font-bold text-xs flex items-center gap-1.5 shadow transition cursor-pointer"
                   >
-                    <Download className="w-3.5 h-3.5 text-yellow-400" />
-                    <span>Портативный архив (.tar.gz)</span>
-                  </a>
+                    {copiedKey === 'pkg_cmd' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-yellow-400" />}
+                    <span>{copiedKey === 'pkg_cmd' ? t.ubuntuCopied : 'Копировать npm run package:ubuntu'}</span>
+                  </button>
                 </div>
               </div>
 

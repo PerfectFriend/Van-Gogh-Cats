@@ -13,14 +13,16 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PACKAGE_NAME="vangogh-cats-gallery"
 VERSION="1.0.0"
 ARCH="all"
+APP_URL="${1:-${APP_URL:-http://localhost:3000}}"
 DEB_NAME="${PACKAGE_NAME}_${VERSION}_${ARCH}.deb"
 TAR_NAME="${PACKAGE_NAME}_${VERSION}_linux.tar.gz"
+OUTPUT_DIR="${ROOT_DIR}/dist/packages"
 
 BUILD_ROOT="/tmp/vangogh-deb-build"
 rm -rf "${BUILD_ROOT}"
-mkdir -p "${BUILD_ROOT}"
+mkdir -p "${BUILD_ROOT}" "${OUTPUT_DIR}"
 
-echo "📦 Сборка инсталляционного пакета Debian/Ubuntu для ${PACKAGE_NAME} v${VERSION}..."
+echo "📦 Сборка инсталляционного пакета Debian/Ubuntu для ${PACKAGE_NAME} v${VERSION} (${APP_URL})..."
 
 # 1. Directory Structure inside package
 INSTALL_BIN="${BUILD_ROOT}/usr/bin"
@@ -40,27 +42,27 @@ mkdir -p "${INSTALL_DOC}"
 mkdir -p "${INSTALL_DEBIAN}"
 
 # 2. Launcher Binary: /usr/bin/vangogh-cats-gallery
-cat << 'EOF' > "${INSTALL_BIN}/${PACKAGE_NAME}"
+cat << EOF > "${INSTALL_BIN}/${PACKAGE_NAME}"
 #!/usr/bin/env bash
 # Van Gogh CryptoCats - Native Ubuntu/Linux Launcher
 set -e
 
 APP_NAME="Van Gogh CryptoCats"
-DEFAULT_URL="https://ais-pre-ypwd3d2freqhamtros5prz-468670053177.europe-west3.run.app"
-TARGET_URL="${VANGOGH_URL:-$DEFAULT_URL}"
-DATA_DIR="${HOME}/.local/share/vangogh-cats-gallery"
-PROFILE_DIR="${DATA_DIR}/profile"
+DEFAULT_URL="${APP_URL}"
+TARGET_URL="\${VANGOGH_URL:-\$DEFAULT_URL}"
+DATA_DIR="\${HOME}/.local/share/vangogh-cats-gallery"
+PROFILE_DIR="\${DATA_DIR}/profile"
 
-mkdir -p "${DATA_DIR}" "${PROFILE_DIR}"
+mkdir -p "\${DATA_DIR}" "\${PROFILE_DIR}"
 
-for arg in "$@"; do
-  case $arg in
+for arg in "\$@"; do
+  case \$arg in
     --url=*)
-      TARGET_URL="${arg#*=}"
+      TARGET_URL="\${arg#*=}"
       shift
       ;;
     --help|-h)
-      echo "$APP_NAME - Art Gallery & AI Post-Impressionist Studio"
+      echo "\$APP_NAME - Art Gallery & AI Post-Impressionist Studio"
       echo ""
       echo "Использование: vangogh-cats-gallery [опции]"
       echo ""
@@ -74,7 +76,7 @@ for arg in "$@"; do
       exit 0
       ;;
     --version|-v)
-      echo "$APP_NAME version 1.0.0 (Ubuntu Release Candidate)"
+      echo "\$APP_NAME version 1.0.0"
       exit 0
       ;;
   esac
@@ -82,19 +84,19 @@ done
 
 # Try modern browsers in order of native application mode (--app) support
 if command -v google-chrome &> /dev/null; then
-  exec google-chrome --app="${TARGET_URL}" --class="${APP_NAME}" --user-data-dir="${PROFILE_DIR}" "$@"
+  exec google-chrome --app="\${TARGET_URL}" --class="\${APP_NAME}" --user-data-dir="\${PROFILE_DIR}" "\$@"
 elif command -v chromium-browser &> /dev/null; then
-  exec chromium-browser --app="${TARGET_URL}" --class="${APP_NAME}" --user-data-dir="${PROFILE_DIR}" "$@"
+  exec chromium-browser --app="\${TARGET_URL}" --class="\${APP_NAME}" --user-data-dir="\${PROFILE_DIR}" "\$@"
 elif command -v chromium &> /dev/null; then
-  exec chromium --app="${TARGET_URL}" --class="${APP_NAME}" --user-data-dir="${PROFILE_DIR}" "$@"
+  exec chromium --app="\${TARGET_URL}" --class="\${APP_NAME}" --user-data-dir="\${PROFILE_DIR}" "\$@"
 elif command -v brave-browser &> /dev/null; then
-  exec brave-browser --app="${TARGET_URL}" --class="${APP_NAME}" --user-data-dir="${PROFILE_DIR}" "$@"
+  exec brave-browser --app="\${TARGET_URL}" --class="\${APP_NAME}" --user-data-dir="\${PROFILE_DIR}" "\$@"
 elif command -v microsoft-edge &> /dev/null; then
-  exec microsoft-edge --app="${TARGET_URL}" --class="${APP_NAME}" --user-data-dir="${PROFILE_DIR}" "$@"
+  exec microsoft-edge --app="\${TARGET_URL}" --class="\${APP_NAME}" --user-data-dir="\${PROFILE_DIR}" "\$@"
 elif command -v firefox &> /dev/null; then
-  exec firefox --new-window "${TARGET_URL}" "$@"
+  exec firefox --new-window "\${TARGET_URL}" "\$@"
 elif command -v xdg-open &> /dev/null; then
-  exec xdg-open "${TARGET_URL}" "$@"
+  exec xdg-open "\${TARGET_URL}" "\$@"
 else
   echo "Ошибка: Не найден подходящий браузер (Chrome, Chromium, Brave или Firefox)." >&2
   exit 1
@@ -173,13 +175,13 @@ cat << EOF > "${INSTALL_SHARE}/package-info.json"
 EOF
 chmod 644 "${INSTALL_SHARE}/package-info.json"
 
-cat << 'EOF' > "${INSTALL_DOC}/copyright"
+cat << EOF > "${INSTALL_DOC}/copyright"
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: vangogh-cats-gallery
-Source: https://ais-pre-ypwd3d2freqhamtros5prz-468670053177.europe-west3.run.app
+Source: ${APP_URL}
 
 Files: *
-Copyright: 2026 Vincent & CryptoCats Guild <yusyajedusya@gmail.com>
+Copyright: 2026 Vincent & CryptoCats Guild
 License: MIT
 EOF
 chmod 644 "${INSTALL_DOC}/copyright"
@@ -206,10 +208,10 @@ Section: graphics
 Priority: optional
 Architecture: ${ARCH}
 Installed-Size: ${INSTALLED_SIZE}
-Maintainer: Vincent & CryptoCats Guild <yusyajedusya@gmail.com>
+Maintainer: Vincent & CryptoCats Guild <noreply@localhost>
 Depends: bash (>= 4.0), curl
 Recommends: chromium-browser | google-chrome-stable | chromium | brave-browser | firefox
-Homepage: https://ais-pre-ypwd3d2freqhamtros5prz-468670053177.europe-west3.run.app
+Homepage: ${APP_URL}
 Description: Van Gogh CryptoCats - Art Gallery & AI Post-Impressionist Studio
  Интерактивная галерея шедевров и AI-генератор котиков в стиле Вана Гога.
  Включает децентрализованную P2P-сеть, резервное копирование .vangoghcat,
@@ -249,12 +251,9 @@ exit 0
 EOF
 chmod 755 "${INSTALL_DEBIAN}/postrm"
 
-# 7. Build .deb package using dpkg-deb
-mkdir -p "${ROOT_DIR}/public"
-dpkg-deb --build "${BUILD_ROOT}" "${ROOT_DIR}/public/${DEB_NAME}"
-
-# Also make a generic symlink or copy for easy static link download
-cp -f "${ROOT_DIR}/public/${DEB_NAME}" "${ROOT_DIR}/public/vangogh-cats-gallery_latest_all.deb"
+# 7. Build .deb package using dpkg-deb into dist/packages/
+dpkg-deb --build "${BUILD_ROOT}" "${OUTPUT_DIR}/${DEB_NAME}"
+cp -f "${OUTPUT_DIR}/${DEB_NAME}" "${OUTPUT_DIR}/vangogh-cats-gallery_latest_all.deb"
 
 # 8. Build standalone tar.gz for portable install
 TAR_DIR="/tmp/vangogh-tar-build"
@@ -300,17 +299,9 @@ Van Gogh CryptoCats - Portable Linux Edition
    ./launch.sh
 EOF
 
-tar -czf "${ROOT_DIR}/public/${TAR_NAME}" -C "${TAR_DIR}" "${PACKAGE_NAME}"
-cp -f "${ROOT_DIR}/public/${TAR_NAME}" "${ROOT_DIR}/public/vangogh-cats-gallery_latest_linux.tar.gz"
+tar -czf "${OUTPUT_DIR}/${TAR_NAME}" -C "${TAR_DIR}" "${PACKAGE_NAME}"
+cp -f "${OUTPUT_DIR}/${TAR_NAME}" "${OUTPUT_DIR}/vangogh-cats-gallery_latest_linux.tar.gz"
 
-# Copy to dist if dist exists
-if [ -d "${ROOT_DIR}/dist" ]; then
-  cp -f "${ROOT_DIR}/public/${DEB_NAME}" "${ROOT_DIR}/dist/"
-  cp -f "${ROOT_DIR}/public/vangogh-cats-gallery_latest_all.deb" "${ROOT_DIR}/dist/"
-  cp -f "${ROOT_DIR}/public/${TAR_NAME}" "${ROOT_DIR}/dist/"
-  cp -f "${ROOT_DIR}/public/vangogh-cats-gallery_latest_linux.tar.gz" "${ROOT_DIR}/dist/"
-fi
-
-echo "✅ Пакеты успешно собраны:"
-echo "   - ${ROOT_DIR}/public/${DEB_NAME} ($(du -h "${ROOT_DIR}/public/${DEB_NAME}" | cut -f1))"
-echo "   - ${ROOT_DIR}/public/${TAR_NAME} ($(du -h "${ROOT_DIR}/public/${TAR_NAME}" | cut -f1))"
+echo "✅ Пакеты успешно собраны в ${OUTPUT_DIR}:"
+echo "   - ${OUTPUT_DIR}/${DEB_NAME} ($(du -h "${OUTPUT_DIR}/${DEB_NAME}" | cut -f1))"
+echo "   - ${OUTPUT_DIR}/${TAR_NAME} ($(du -h "${OUTPUT_DIR}/${TAR_NAME}" | cut -f1))"

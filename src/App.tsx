@@ -1,32 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import { X, Crown } from 'lucide-react';
+import React, { useState, useEffect, Suspense } from 'react';
+import { X, Crown, Loader2 } from 'lucide-react';
 import { ArtStudioGenerator, StudioGenerateParams } from './components/ArtStudioGenerator';
-import { ImageEditorModal } from './components/ImageEditorModal';
-import { BrushstrokeZoomModal } from './components/BrushstrokeZoomModal';
-import { AndroidInstallModal } from './components/AndroidInstallModal';
-import { AndroidInstallBanner } from './components/AndroidInstallBanner';
-import { UbuntuDesktopModal } from './components/UbuntuDesktopModal';
-import { P2PNetworkHub } from './components/P2PNetworkHub';
-import { FileComplaintModal } from './components/FileComplaintModal';
-import { CatPassportModal } from './components/CatPassportModal';
-import { ProUpgradeModal } from './components/ProUpgradeModal';
-import { MuseumFramingModal } from './components/MuseumFramingModal';
-import { MuseumPostcardModal } from './components/MuseumPostcardModal';
-import { ArtworkGuestbookModal } from './components/ArtworkGuestbookModal';
-import { DeletePublicationModal } from './components/DeletePublicationModal';
 import { RasterThemeBackground } from './components/theming/RasterThemeBackground';
 import { SplashScreen } from './components/SplashScreen';
 import { SystemPermissionsModal } from './components/SystemPermissionsModal';
 import { OnboardingModal } from './components/OnboardingModal';
-import { SystemPlatformsView } from './components/SystemPlatformsView';
+import { AndroidInstallBanner } from './components/AndroidInstallBanner';
 import { InstagramNav } from './components/instagram/InstagramNav';
 import { StoriesStrip } from './components/instagram/StoriesStrip';
-import { InstagramStoryModal } from './components/instagram/InstagramStoryModal';
 import { InstagramFeedPost } from './components/instagram/InstagramFeedPost';
-import { InstagramExploreView } from './components/instagram/InstagramExploreView';
-import { InstagramProfileView } from './components/instagram/InstagramProfileView';
 import { ArtworkActionSheet } from './components/instagram/ArtworkActionSheet';
 import { ThemeDrawerModal } from './components/instagram/ThemeDrawerModal';
+
+const ImageEditorModal = React.lazy(() => import('./components/ImageEditorModal').then(m => ({ default: m.ImageEditorModal })));
+const BrushstrokeZoomModal = React.lazy(() => import('./components/BrushstrokeZoomModal').then(m => ({ default: m.BrushstrokeZoomModal })));
+const AndroidInstallModal = React.lazy(() => import('./components/AndroidInstallModal').then(m => ({ default: m.AndroidInstallModal })));
+const UbuntuDesktopModal = React.lazy(() => import('./components/UbuntuDesktopModal').then(m => ({ default: m.UbuntuDesktopModal })));
+const P2PNetworkHub = React.lazy(() => import('./components/P2PNetworkHub').then(m => ({ default: m.P2PNetworkHub })));
+const FileComplaintModal = React.lazy(() => import('./components/FileComplaintModal').then(m => ({ default: m.FileComplaintModal })));
+const CatPassportModal = React.lazy(() => import('./components/CatPassportModal').then(m => ({ default: m.CatPassportModal })));
+const ProUpgradeModal = React.lazy(() => import('./components/ProUpgradeModal').then(m => ({ default: m.ProUpgradeModal })));
+const MuseumFramingModal = React.lazy(() => import('./components/MuseumFramingModal').then(m => ({ default: m.MuseumFramingModal })));
+const MuseumPostcardModal = React.lazy(() => import('./components/MuseumPostcardModal').then(m => ({ default: m.MuseumPostcardModal })));
+const ArtworkGuestbookModal = React.lazy(() => import('./components/ArtworkGuestbookModal').then(m => ({ default: m.ArtworkGuestbookModal })));
+const DeletePublicationModal = React.lazy(() => import('./components/DeletePublicationModal').then(m => ({ default: m.DeletePublicationModal })));
+const SystemPlatformsView = React.lazy(() => import('./components/SystemPlatformsView').then(m => ({ default: m.SystemPlatformsView })));
+const InstagramExploreView = React.lazy(() => import('./components/instagram/InstagramExploreView').then(m => ({ default: m.InstagramExploreView })));
+const InstagramProfileView = React.lazy(() => import('./components/instagram/InstagramProfileView').then(m => ({ default: m.InstagramProfileView })));
+const InstagramStoryModal = React.lazy(() => import('./components/instagram/InstagramStoryModal').then(m => ({ default: m.InstagramStoryModal })));
 import { INITIAL_MASTERPIECES } from './data/masterpieces';
 import { GOURMET_CAT_SPONSORS } from './data/catSponsors';
 import { Artwork, AspectRatioType, ArtistProfile, CatProfile, MainAppTab, StoredUserProfile } from './types';
@@ -49,6 +50,7 @@ import { p2pNetwork } from './utils/p2pNetwork';
 import { museumAudio } from './utils/museumAudio';
 import { useTranslation } from './context/LanguageContext';
 import { useFirebaseAuth } from './context/FirebaseAuthContext';
+import { auth } from './firebase';
 
 export default function App() {
   const { t, setLanguage } = useTranslation();
@@ -229,23 +231,7 @@ export default function App() {
       );
     });
 
-    fetch('/api/artworks')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.artworks && Array.isArray(data.artworks) && data.artworks.length > 0) {
-          const cleanServerArt = data.artworks.filter(isCleanArtwork);
-          setArtworks((prev) => {
-            const existingIds = new Set(cleanServerArt.map((a: Artwork) => a.id));
-            const remaining = prev.filter((a) => isCleanArtwork(a) && !existingIds.has(a.id));
-            return [...cleanServerArt, ...remaining];
-          });
-        }
-      })
-      .catch((err) => {
-        console.warn('Using local initial masterpieces:', err);
-      });
-    // Merge cloud artworks synced from signed-in Google account
-    // Handled in dedicated effect below
+    // Merge cloud artworks synced from signed-in Google account in effect below
   }, []);
 
   useEffect(() => {
@@ -267,6 +253,11 @@ export default function App() {
       }
     }
 
+    if (!auth.currentUser) {
+      setError('Для генерации картин с ИИ сначала войдите через Google (кнопка Google вверху студии).');
+      return;
+    }
+
     setIsGenerating(true);
     setError(null);
     const total = params.batchCount || 1;
@@ -281,13 +272,18 @@ export default function App() {
     const authorName = googleUser?.displayName || artistProfile.name;
 
     try {
+      const idToken = await auth.currentUser.getIdToken();
+
       for (let i = 0; i < total; i++) {
         setGenerationProgress({ current: i + 1, total });
         const stepPrompt = `${params.prompt}${batchAngles[i] || ''}`.trim();
 
         const response = await fetch('/api/generate-image', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
           body: JSON.stringify({
             prompt: stepPrompt,
             model: params.model,
@@ -421,9 +417,6 @@ export default function App() {
       if (googleUser) {
         deleteArtworkFromCloud(artworkId).catch(() => {});
       }
-      try {
-        await fetch(`/api/artwork/${artworkId}`, { method: 'DELETE' });
-      } catch {}
 
       setArtworks((prev) => prev.filter((a) => a.id !== artworkId));
       if (selectedPostModalArtwork?.id === artworkId) {
@@ -578,12 +571,14 @@ export default function App() {
 
         {/* TAB 2: EXPLORE GRID */}
         {activeTab === 'explore' && (
-          <InstagramExploreView
-            artworks={feedArtworks}
-            activeArtworkId={activeArtworkId}
-            onSelectArtwork={(art) => setSelectedPostModalArtwork(art)}
-            onOpenContextMenu={(art) => setContextMenuArtwork(art)}
-          />
+          <Suspense fallback={<div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-amber-400" /></div>}>
+            <InstagramExploreView
+              artworks={feedArtworks}
+              activeArtworkId={activeArtworkId}
+              onSelectArtwork={(art) => setSelectedPostModalArtwork(art)}
+              onOpenContextMenu={(art) => setContextMenuArtwork(art)}
+            />
+          </Suspense>
         )}
 
         {/* TAB 3: CREATE STUDIO */}
@@ -609,58 +604,64 @@ export default function App() {
         {/* TAB 4: DIRECT P2P NETWORK */}
         {activeTab === 'network' && (
           <div className="max-w-5xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
-            <P2PNetworkHub
-              artistProfile={artistProfile}
-              myArtworks={artworks}
-              onProfileUpdate={(updated) => setArtistProfile(updated)}
-              onAddArtworksFromPeer={(newArts) => {
-                setArtworks((prev) => {
-                  const existing = new Set(prev.map((a) => a.id));
-                  const filtered = newArts.filter((a) => !existing.has(a.id));
-                  return [...filtered, ...prev];
-                });
-              }}
-              onSelectArtwork={(artwork) => {
-                setSelectedPostModalArtwork(artwork);
-              }}
-              onLikeArtwork={handleLike}
-              onPurgeCondemnedArtwork={handlePurgeCondemnedArtwork}
-            />
+            <Suspense fallback={<div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-amber-400" /></div>}>
+              <P2PNetworkHub
+                artistProfile={artistProfile}
+                myArtworks={artworks}
+                onProfileUpdate={(updated) => setArtistProfile(updated)}
+                onAddArtworksFromPeer={(newArts) => {
+                  setArtworks((prev) => {
+                    const existing = new Set(prev.map((a) => a.id));
+                    const filtered = newArts.filter((a) => !existing.has(a.id));
+                    return [...filtered, ...prev];
+                  });
+                }}
+                onSelectArtwork={(artwork) => {
+                  setSelectedPostModalArtwork(artwork);
+                }}
+                onLikeArtwork={handleLike}
+                onPurgeCondemnedArtwork={handlePurgeCondemnedArtwork}
+              />
+            </Suspense>
           </div>
         )}
 
         {/* TAB 5: INSTAGRAM PROFILE (with BIP-39 Vault & System inside Drawer/Subtabs) */}
         {activeTab === 'profiles' && (
-          <InstagramProfileView
-            currentProfile={artistProfile}
-            artworks={artworks}
-            isPro={isPro}
-            onProfileChanged={(updatedProfile) => {
-              setArtistProfile(updatedProfile);
-              setProfilesList(getAllProfiles());
-              initP2PForProfile(updatedProfile);
-            }}
-            onSelectArtwork={(art) => setSelectedPostModalArtwork(art)}
-            onOpenContextMenu={(art) => setContextMenuArtwork(art)}
-            onOpenCatPassport={() => setIsCatPassportOpen(true)}
-            onOpenUbuntuModal={() => setIsUbuntuModalOpen(true)}
-            onOpenAndroidModal={() => setIsAndroidModalOpen(true)}
-            onOpenProModal={() => setIsProModalOpen(true)}
-            onOpenThemeDrawer={() => setIsThemeDrawerOpen(true)}
-            onOpenCreateStudio={() => setActiveTab('studio')}
-            onOpenOnboardingModal={() => setShowOnboardingModal(true)}
-          />
+          <Suspense fallback={<div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-amber-400" /></div>}>
+            <InstagramProfileView
+              currentProfile={artistProfile}
+              artworks={artworks}
+              isPro={isPro}
+              onProfileChanged={(updatedProfile) => {
+                setArtistProfile(updatedProfile);
+                setProfilesList(getAllProfiles());
+                initP2PForProfile(updatedProfile);
+              }}
+              onSelectArtwork={(art) => setSelectedPostModalArtwork(art)}
+              onOpenContextMenu={(art) => setContextMenuArtwork(art)}
+              onOpenCatPassport={() => setIsCatPassportOpen(true)}
+              onOpenUbuntuModal={() => setIsUbuntuModalOpen(true)}
+              onOpenAndroidModal={() => setIsAndroidModalOpen(true)}
+              onOpenProModal={() => setIsProModalOpen(true)}
+              onOpenThemeDrawer={() => setIsThemeDrawerOpen(true)}
+              onOpenCreateStudio={() => setActiveTab('studio')}
+              onOpenOnboardingModal={() => setShowOnboardingModal(true)}
+            />
+          </Suspense>
         )}
 
         {/* TAB 6: SYSTEM VIEW (accessible via Menu -> System) */}
         {activeTab === 'system' && (
-          <SystemPlatformsView
-            onOpenUbuntuModal={() => setIsUbuntuModalOpen(true)}
-            onOpenAndroidModal={() => setIsAndroidModalOpen(true)}
-            onOpenProModal={() => setIsProModalOpen(true)}
-            isPro={isPro}
-            artworksCount={artworks.length}
-          />
+          <Suspense fallback={<div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-amber-400" /></div>}>
+            <SystemPlatformsView
+              onOpenUbuntuModal={() => setIsUbuntuModalOpen(true)}
+              onOpenAndroidModal={() => setIsAndroidModalOpen(true)}
+              onOpenProModal={() => setIsProModalOpen(true)}
+              isPro={isPro}
+              artworksCount={artworks.length}
+            />
+          </Suspense>
         )}
       </main>
 
@@ -719,16 +720,20 @@ export default function App() {
       />
 
       {/* Fullscreen Story Viewer Modal */}
-      <InstagramStoryModal
-        isOpen={storyViewerState.isOpen}
-        initialArtwork={storyViewerState.artwork}
-        initialThemeId={storyViewerState.themeId}
-        artworks={feedArtworks}
-        onClose={() => setStoryViewerState({ isOpen: false, artwork: null })}
-        onOpenZoom={(art) => setZoomArtwork(art)}
-        onLike={handleLike}
-        onOpenInStudio={() => setActiveTab('studio')}
-      />
+      <Suspense fallback={null}>
+        {storyViewerState.isOpen && (
+          <InstagramStoryModal
+            isOpen={storyViewerState.isOpen}
+            initialArtwork={storyViewerState.artwork}
+            initialThemeId={storyViewerState.themeId}
+            artworks={feedArtworks}
+            onClose={() => setStoryViewerState({ isOpen: false, artwork: null })}
+            onOpenZoom={(art) => setZoomArtwork(art)}
+            onLike={handleLike}
+            onOpenInStudio={() => setActiveTab('studio')}
+          />
+        )}
+      </Suspense>
 
       {/* Themes & Language Sheet */}
       <ThemeDrawerModal
@@ -750,87 +755,111 @@ export default function App() {
         artworks={artworks}
       />
 
-      <BrushstrokeZoomModal
-        artwork={zoomArtwork}
-        isOpen={!!zoomArtwork}
-        onClose={() => setZoomArtwork(null)}
-      />
+      <Suspense fallback={null}>
+        {!!zoomArtwork && (
+          <BrushstrokeZoomModal
+            artwork={zoomArtwork}
+            isOpen={!!zoomArtwork}
+            onClose={() => setZoomArtwork(null)}
+          />
+        )}
 
-      <ImageEditorModal
-        artwork={editorArtwork}
-        isOpen={!!editorArtwork}
-        onClose={() => setEditorArtwork(null)}
-        onImageEdited={handleImageEdited}
-        activeModel={activeModel}
-        isBannedReadOnly={artistProfile.isBannedReadOnly}
-      />
+        {!!editorArtwork && (
+          <ImageEditorModal
+            artwork={editorArtwork}
+            isOpen={!!editorArtwork}
+            onClose={() => setEditorArtwork(null)}
+            onImageEdited={handleImageEdited}
+            activeModel={activeModel}
+            isBannedReadOnly={artistProfile.isBannedReadOnly}
+          />
+        )}
 
-      <FileComplaintModal
-        artwork={complaintArtwork}
-        isOpen={!!complaintArtwork}
-        onClose={() => setComplaintArtwork(null)}
-        onSubmit={handleSubmitComplaint}
-      />
+        {!!complaintArtwork && (
+          <FileComplaintModal
+            artwork={complaintArtwork}
+            isOpen={!!complaintArtwork}
+            onClose={() => setComplaintArtwork(null)}
+            onSubmit={handleSubmitComplaint}
+          />
+        )}
 
-      <DeletePublicationModal
-        artwork={deletingArtwork}
-        isOpen={!!deletingArtwork}
-        onClose={() => setDeletingArtwork(null)}
-        onConfirmDelete={handleConfirmDelete}
-      />
+        {!!deletingArtwork && (
+          <DeletePublicationModal
+            artwork={deletingArtwork}
+            isOpen={!!deletingArtwork}
+            onClose={() => setDeletingArtwork(null)}
+            onConfirmDelete={handleConfirmDelete}
+          />
+        )}
 
-      <CatPassportModal
-        isOpen={isCatPassportOpen}
-        onClose={() => setIsCatPassportOpen(false)}
-        onSelectCatForStudio={(cat) => {
-          setActiveCat(cat);
-          setExternalStudioPrompt(
-            `Кот по имени ${cat.name}, порода: ${cat.breed}, цвет глаз: ${cat.eyeColor}. Особые приметы: ${cat.distinctiveMarks}. Сидит задумчиво и смотрит на звёзды.`
-          );
-          setActiveTab('studio');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-      />
+        {isCatPassportOpen && (
+          <CatPassportModal
+            isOpen={isCatPassportOpen}
+            onClose={() => setIsCatPassportOpen(false)}
+            onSelectCatForStudio={(cat) => {
+              setActiveCat(cat);
+              setExternalStudioPrompt(
+                `Кот по имени ${cat.name}, порода: ${cat.breed}, цвет глаз: ${cat.eyeColor}. Особые приметы: ${cat.distinctiveMarks}. Сидит задумчиво и смотрит на звёзды.`
+              );
+              setActiveTab('studio');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        )}
 
-      <ProUpgradeModal
-        isOpen={isProModalOpen}
-        onClose={() => setIsProModalOpen(false)}
-        isPro={isPro}
-        onActivatePro={handleActivatePro}
-        onDeactivatePro={handleDeactivatePro}
-      />
+        {isProModalOpen && (
+          <ProUpgradeModal
+            isOpen={isProModalOpen}
+            onClose={() => setIsProModalOpen(false)}
+            isPro={isPro}
+            onActivatePro={handleActivatePro}
+            onDeactivatePro={handleDeactivatePro}
+          />
+        )}
 
-      <MuseumFramingModal
-        isOpen={!!framingArtwork}
-        onClose={() => setFramingArtwork(null)}
-        artwork={framingArtwork}
-      />
+        {!!framingArtwork && (
+          <MuseumFramingModal
+            isOpen={!!framingArtwork}
+            onClose={() => setFramingArtwork(null)}
+            artwork={framingArtwork}
+          />
+        )}
 
-      <MuseumPostcardModal
-        isOpen={!!postcardArtwork}
-        onClose={() => setPostcardArtwork(null)}
-        artwork={postcardArtwork}
-        artistName={artistProfile.name}
-      />
+        {!!postcardArtwork && (
+          <MuseumPostcardModal
+            isOpen={!!postcardArtwork}
+            onClose={() => setPostcardArtwork(null)}
+            artwork={postcardArtwork}
+            artistName={artistProfile.name}
+          />
+        )}
 
-      <ArtworkGuestbookModal
-        isOpen={!!guestbookArtwork}
-        onClose={() => setGuestbookArtwork(null)}
-        artwork={guestbookArtwork}
-        currentArtistName={artistProfile.name}
-      />
+        {!!guestbookArtwork && (
+          <ArtworkGuestbookModal
+            isOpen={!!guestbookArtwork}
+            onClose={() => setGuestbookArtwork(null)}
+            artwork={guestbookArtwork}
+            currentArtistName={artistProfile.name}
+          />
+        )}
 
-      <AndroidInstallBanner onOpenModal={() => setIsAndroidModalOpen(true)} />
+        <AndroidInstallBanner onOpenModal={() => setIsAndroidModalOpen(true)} />
 
-      <AndroidInstallModal
-        isOpen={isAndroidModalOpen}
-        onClose={() => setIsAndroidModalOpen(false)}
-      />
+        {isAndroidModalOpen && (
+          <AndroidInstallModal
+            isOpen={isAndroidModalOpen}
+            onClose={() => setIsAndroidModalOpen(false)}
+          />
+        )}
 
-      <UbuntuDesktopModal
-        isOpen={isUbuntuModalOpen}
-        onClose={() => setIsUbuntuModalOpen(false)}
-      />
+        {isUbuntuModalOpen && (
+          <UbuntuDesktopModal
+            isOpen={isUbuntuModalOpen}
+            onClose={() => setIsUbuntuModalOpen(false)}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

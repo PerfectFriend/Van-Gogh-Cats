@@ -88,6 +88,11 @@ export const P2PNetworkHub: React.FC<P2PNetworkHubProps> = ({
   });
   const [backupArtworks, setBackupArtworks] = useState<Artwork[]>([]);
 
+  // Inline artist name edit & feedback state (replaces window.alert/prompt)
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editingNameValue, setEditingNameValue] = useState(artistProfile.name);
+  const [nameEditError, setNameEditError] = useState<string | null>(null);
+
   // Disputes & Peer Jury Audit
   const [disputes, setDisputes] = useState<PeerDispute[]>([]);
   const [votingDisputeId, setVotingDisputeId] = useState<string | null>(null);
@@ -133,18 +138,19 @@ export const P2PNetworkHub: React.FC<P2PNetworkHubProps> = ({
   }, [friends]);
 
   useEffect(() => {
-    const code = p2pNetwork.createInviteCode(myArtworks);
-    setInviteCode(code);
+    setInviteCode(p2pNetwork.createInviteCode(myArtworks));
+  }, [myArtworks]);
 
+  useEffect(() => {
     calculateStorageUsage().then(setStorageInfo);
     getFriendBackupArtworks().then(setBackupArtworks);
     setDisputes(getPeerDisputes());
 
-    // Fetch LAN info for dual Ubuntu host connectivity
+    // Fetch LAN info for dual Ubuntu host connectivity (dev/local only; returns 404 in production)
     fetch('/api/network/lan-info')
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data.success) setLanInfo(data);
+        if (data?.success) setLanInfo(data);
       })
       .catch(() => {});
 
@@ -209,7 +215,7 @@ export const P2PNetworkHub: React.FC<P2PNetworkHubProps> = ({
       window.removeEventListener('p2p:artwork_replicated', handleArtworkReplicated);
       unsubDiscovered();
     };
-  }, [myArtworks, artistProfile, onPurgeCondemnedArtwork, onAddArtworksFromPeer]);
+  }, [artistProfile, onPurgeCondemnedArtwork, onAddArtworksFromPeer]);
 
   const handleConnectDiscoveredPeer = async (peer: SignalingPeer) => {
     setConnectingPeerId(peer.peerId);
@@ -302,17 +308,29 @@ export const P2PNetworkHub: React.FC<P2PNetworkHubProps> = ({
     }
   };
 
-  const handleEditName = () => {
+  const handleStartEditName = () => {
     if (artistProfile.isBannedReadOnly) {
-      alert('Ваш профиль находится в режиме ТОЛЬКО ЧТЕНИЕ по вердикту суда пиров.');
+      setNameEditError('Ваш профиль находится в режиме ТОЛЬКО ЧТЕНИЕ по вердикту локальной коллегии.');
+      setTimeout(() => setNameEditError(null), 5000);
       return;
     }
-    const newName = prompt('Введите имя вашего художника в P2P сети:', artistProfile.name);
-    if (newName && newName.trim()) {
-      const updated = { ...artistProfile, name: newName.trim() };
-      onProfileUpdate(updated);
-      saveArtistProfile(updated);
+    setEditingNameValue(artistProfile.name);
+    setNameEditError(null);
+    setIsEditingName(true);
+  };
+
+  const handleSaveName = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = editingNameValue.trim();
+    if (!trimmed) {
+      setNameEditError('Введите непустое имя художника');
+      return;
     }
+    const updated = { ...artistProfile, name: trimmed };
+    onProfileUpdate(updated);
+    saveArtistProfile(updated);
+    setIsEditingName(false);
+    setNameEditError(null);
   };
 
   const handleVote = async (disputeId: string, voteType: 'confirm' | 'reject') => {
@@ -378,17 +396,49 @@ export const P2PNetworkHub: React.FC<P2PNetworkHubProps> = ({
                 ID: {artistProfile.id.substring(0, 8)}...
               </span>
             </div>
-            <h2 className="text-xl sm:text-2xl font-gaudi font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-yellow-200 to-cyan-300 flex items-center gap-2 mt-1">
-              {artistProfile.name}
-              {!artistProfile.isBannedReadOnly && (
-                <button 
-                  onClick={handleEditName}
-                  className="text-xs text-amber-300 hover:text-yellow-200 underline font-sans font-normal ml-2 cursor-pointer"
+            {isEditingName ? (
+              <form onSubmit={handleSaveName} className="flex items-center gap-2 mt-1.5 flex-wrap">
+                <input
+                  type="text"
+                  value={editingNameValue}
+                  onChange={(e) => setEditingNameValue(e.target.value)}
+                  maxLength={40}
+                  className="px-2.5 py-1 rounded-lg bg-slate-900 border border-cyan-500/60 text-sm text-amber-100 focus:outline-none"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer"
                 >
-                  (изменить)
+                  Сохранить
                 </button>
-              )}
-            </h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingName(false);
+                    setNameEditError(null);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+                >
+                  Отмена
+                </button>
+              </form>
+            ) : (
+              <h2 className="text-xl sm:text-2xl font-gaudi font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-yellow-200 to-cyan-300 flex items-center gap-2 mt-1">
+                {artistProfile.name}
+                {!artistProfile.isBannedReadOnly && (
+                  <button
+                    onClick={handleStartEditName}
+                    className="text-xs text-amber-300 hover:text-yellow-200 underline font-sans font-normal ml-2 cursor-pointer"
+                  >
+                    (изменить)
+                  </button>
+                )}
+              </h2>
+            )}
+            {nameEditError && (
+              <p className="text-xs text-rose-400 mt-1">{nameEditError}</p>
+            )}
             {artistProfile.isBannedReadOnly ? (
               <p className="text-xs text-red-300 mt-0.5 font-medium">
                 Причина: {artistProfile.bannedReason || 'Нарушение правил сообщества подтверждено кворумом 2:1'}
@@ -759,9 +809,14 @@ export const P2PNetworkHub: React.FC<P2PNetworkHubProps> = ({
           <div className="p-4 rounded-2xl bg-indigo-950/40 border border-indigo-500/40 flex items-start gap-3.5">
             <Gavel className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div className="text-xs text-slate-300 space-y-1.5 leading-relaxed">
-              <strong className="text-amber-200 font-semibold block text-sm">
-                Защита от вредителей и ложных доносов: Коллегия аудиторов-пиров (Кворум 2:1)
-              </strong>
+              <div className="flex items-center gap-2 flex-wrap">
+                <strong className="text-amber-200 font-semibold text-sm">
+                  Коллегия аудиторов (Кворум 2:1)
+                </strong>
+                <span className="px-2 py-0.5 rounded-full bg-slate-900 border border-indigo-400/40 text-[10px] text-indigo-200">
+                  Игровая механика · Локальная коллегия на устройстве
+                </span>
+              </div>
               <p>
                 Если поступает жалоба от одного из пиров, другие участники сети призываются в качестве аудиторов.
                 Они беспристрастно исследуют холст и подтверждают либо отвергают жалобу.
@@ -993,37 +1048,42 @@ export const P2PNetworkHub: React.FC<P2PNetworkHubProps> = ({
             Список участников вашего децентрализованного сообщества. Каждый пир выступает потенциальным аудитором в спорах.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {friends.map((friend) => (
-              <div key={friend.peerId} className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${friend.avatarColor} flex items-center justify-center text-xl shadow-md`}>
-                    🐱
+            {friends.map((friend) => {
+              const isBot = friend.peerId === 'peer_theo_vangogh' || friend.peerId === 'peer_arles_cat';
+              return (
+                <div key={friend.peerId} className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${friend.avatarColor} flex items-center justify-center text-xl shadow-md`}>
+                      🐱
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-100">{friend.name}</h4>
+                      <p className="text-xs text-slate-400">
+                        Картин: <strong className="text-amber-300">{friend.artworkCount}</strong> • Статус: <span className="text-emerald-400 font-semibold">{friend.status}</span>
+                      </p>
+                      <span className="text-[10px] text-indigo-300">
+                        {isBot ? 'Демо-бот · локальный собеседник' : 'Живой WebRTC пир'}
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-bold text-sm text-slate-100">{friend.name}</h4>
-                    <p className="text-xs text-slate-400">
-                      Картин: <strong className="text-amber-300">{friend.artworkCount}</strong> • Статус: <span className="text-emerald-400 font-semibold">{friend.status}</span>
-                    </p>
-                    <span className="text-[10px] text-indigo-300">Аудитор децентрализованного суда</span>
+                  <div className="text-right flex flex-col items-end gap-2">
+                    <span className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                      {isBot ? 'Демо-бот' : friend.connectionMethod}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setChatSelectedFriendId(friend.peerId);
+                        setActiveTab('chat');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95 cursor-pointer"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>{isBot ? 'Демо-чат' : 'E2EE Чат'}</span>
+                    </button>
                   </div>
                 </div>
-                <div className="text-right flex flex-col items-end gap-2">
-                  <span className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                    {friend.connectionMethod}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setChatSelectedFriendId(friend.peerId);
-                      setActiveTab('chat');
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95 cursor-pointer"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" />
-                    <span>E2EE Чат</span>
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

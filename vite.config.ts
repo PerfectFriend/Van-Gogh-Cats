@@ -49,8 +49,22 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff,woff2}'],
+          globPatterns: ['**/*.{js,css,html,ico,svg,woff2}'],
           runtimeCaching: [
+            {
+              urlPattern: /\.(?:png|jpg|jpeg|webp)$/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'gallery-images-cache',
+                expiration: {
+                  maxEntries: 80,
+                  maxAgeSeconds: 60 * 60 * 24 * 30,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'CacheFirst',
@@ -86,6 +100,17 @@ export default defineConfig(() => {
         },
       }),
     ],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+            motion: ['motion'],
+            icons: ['lucide-react'],
+          },
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

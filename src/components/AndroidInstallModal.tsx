@@ -32,7 +32,7 @@ export const AndroidInstallModal: React.FC<AndroidInstallModalProps> = ({ isOpen
 
   if (!isOpen) return null;
 
-  const currentUrl = typeof window !== 'undefined' ? window.location.href : 'https://ais-pre-ypwd3d2freqhamtros5prz-468670053177.europe-west3.run.app';
+  const currentUrl = typeof window !== 'undefined' ? window.location.origin + '/' : 'http://localhost:3000/';
 
   const handleInstallClick = async () => {
     triggerHaptic(30);
@@ -74,7 +74,10 @@ export const AndroidInstallModal: React.FC<AndroidInstallModalProps> = ({ isOpen
 
   const handleOpenExternal = () => {
     triggerHaptic(15);
-    window.open(currentUrl, '_blank');
+    navigator.clipboard.writeText(currentUrl);
+    setCopiedLink(true);
+    setInstallStatusMsg('Ссылка скопирована в буфер обмена — вставьте её в Google Chrome на Android.');
+    setTimeout(() => setCopiedLink(false), 2500);
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -233,7 +236,9 @@ export const AndroidInstallModal: React.FC<AndroidInstallModalProps> = ({ isOpen
                   <div className="flex items-center justify-between bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 text-xs">
                     <div className="flex items-center gap-2 text-slate-400 truncate max-w-[210px] sm:max-w-[280px]">
                       <span className="text-emerald-400 font-mono text-[10px]">🔒 https://</span>
-                      <span className="truncate text-slate-300 font-mono text-[11px]">ais-pre-...run.app</span>
+                      <span className="truncate text-slate-300 font-mono text-[11px]">
+                        {typeof window !== 'undefined' ? window.location.host : 'vangogh-cats.local'}
+                      </span>
                     </div>
 
                     {/* The famous 3 dots in Chrome */}

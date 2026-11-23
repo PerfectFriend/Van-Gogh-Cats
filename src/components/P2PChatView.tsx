@@ -23,7 +23,11 @@ import {
   getCustodyVaultEnvelopes,
   inspectEnvelopePrivacy,
   deliverCustodyEnvelopesForOnlineFriend,
-  announcePeerPresence
+  announcePeerPresence,
+  getOrCreateLocalEcdhKeyPair,
+  getPeerEcdhPublicKey,
+  computeSafetyNumber,
+  getEncryptedEnvelopeById
 } from '../utils/p2pChatProtocol';
 
 interface P2PChatViewProps {
@@ -70,8 +74,13 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
   const [showAttachModal, setShowAttachModal] = useState(false);
   const [showProtocolExplainer, setShowProtocolExplainer] = useState(false);
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
+  const [myEcdhPublicJwk, setMyEcdhPublicJwk] = useState<JsonWebKey | null>(null);
+  const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const isDemoBotFriend = (friend: PeerFriend | null) =>
+    !!friend && (friend.peerId === 'peer_theo_vangogh' || friend.peerId === 'peer_arles_cat');
 
   // Sync active friend if selectedFriendId prop changes
   useEffect(() => {
@@ -81,13 +90,39 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
     }
   }, [selectedFriendId, friends]);
 
-  // Load chat messages when active friend changes
+  // Load local ECDH P-256 public JWK for Safety Number verification
+  useEffect(() => {
+    let cancelled = false;
+    getOrCreateLocalEcdhKeyPair(artistProfile.id)
+      .then((res) => {
+        if (!cancelled) setMyEcdhPublicJwk(res.publicKeyJwk);
+      })
+      .catch(() => {
+        if (!cancelled) setMyEcdhPublicJwk(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artistProfile.id]);
+
+  // Load chat messages and compute Safety Number when active friend changes
   useEffect(() => {
     if (activeFriend) {
       const msgs = getChatMessagesForFriend(artistProfile.id, activeFriend.peerId);
       setMessages(msgs);
+
+      const peerKey = activeFriend.ecdhPublicKeyJwk || getPeerEcdhPublicKey(activeFriend.peerId);
+      if (!isDemoBotFriend(activeFriend) && myEcdhPublicJwk && peerKey) {
+        computeSafetyNumber(myEcdhPublicJwk, peerKey)
+          .then((num) => setSafetyNumber(num))
+          .catch(() => setSafetyNumber(null));
+      } else {
+        setSafetyNumber(null);
+      }
+    } else {
+      setSafetyNumber(null);
     }
-  }, [activeFriend, artistProfile.id]);
+  }, [activeFriend, artistProfile.id, myEcdhPublicJwk]);
 
   // Scroll to bottom on messages update
   useEffect(() => {
@@ -144,6 +179,8 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
       }
     } catch (err: any) {
       console.error('Error sending chat message:', err);
+      setOfflineNotice(err?.message || 'Не удалось отправить сообщение');
+      setTimeout(() => setOfflineNotice(null), 7000);
     } finally {
       setIsSending(false);
     }
@@ -178,10 +215,18 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
     }
   };
 
-  // Open privacy inspector for a message's simulated envelope
+  // Open privacy inspector for the real stored E2EE envelope (or honest demo-bot notice)
   const handleInspectEnvelope = (msg: P2PChatMessage) => {
-    // Reconstruct envelope representation for inspection
-    const envelope: P2PEncryptedEnvelope = {
+    const storedEnvelope = getEncryptedEnvelopeById(msg.envelopeId);
+
+    if (storedEnvelope) {
+      const details = inspectEnvelopePrivacy(storedEnvelope, artistProfile.id);
+      setInspectingEnvelope({ envelope: storedEnvelope, observerPeerId: artistProfile.id, details });
+      return;
+    }
+
+    const fallbackEnvelope: P2PEncryptedEnvelope = {
+      v: msg.isDemoBot ? 0 : 2,
       envelopeId: msg.envelopeId,
       senderPeerId: msg.senderPeerId,
       senderName: msg.senderName,
@@ -189,16 +234,33 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
       recipientName: msg.recipientName,
       createdAt: msg.timestamp,
       expiresAt: msg.timestamp + 86400000 * 7,
-      ciphertext: '4c8e71b9d03a5f22' + Math.random().toString(16).substring(2, 10) + '9bfa78210cd47e335a11c098',
-      iv: 'a3f9104bce91a2775f0011bb',
-      salt: 'c4e92a15998f4410',
-      contentHash: 'hash_' + Math.random().toString(36).substring(2, 10),
+      ciphertext: '',
+      iv: '',
+      salt: '',
+      contentHash: '',
       hops: msg.deliveryRoute,
       isRelayed: !!msg.isRelayedDelivery,
     };
 
-    const details = inspectEnvelopePrivacy(envelope, artistProfile.id);
-    setInspectingEnvelope({ envelope, observerPeerId: artistProfile.id, details });
+    const details = {
+      isAuthorized: false,
+      version: 0,
+      envelopeId: msg.envelopeId,
+      sender: msg.senderName,
+      recipient: msg.recipientName,
+      hops: msg.deliveryRoute,
+      ciphertextPreview: msg.isDemoBot
+        ? '(Демо-бот: открытое демонстрационное сообщение, шифроконверт ECDH не создавался)'
+        : '(Метаданные бинарного конверта не найдены в локальном кэше браузера)',
+      iv: '—',
+      salt: '—',
+      contentHash: '—',
+      statusText: msg.isDemoBot
+        ? 'Демонстрационное сообщение бота — без E2EE шифрования.'
+        : 'Архивный заголовок переписки.',
+    };
+
+    setInspectingEnvelope({ envelope: fallbackEnvelope, observerPeerId: artistProfile.id, details });
   };
 
   return (
@@ -265,8 +327,16 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
                     <div className="truncate">
                       <h4 className="font-semibold text-xs text-slate-200 truncate">{friend.name}</h4>
                       <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                        <Lock className="w-2.5 h-2.5 text-amber-400" />
-                        <span>E2EE канал</span>
+                        {isDemoBotFriend(friend) ? (
+                          <span>Демо-бот · без E2EE</span>
+                        ) : (friend.ecdhPublicKeyJwk || getPeerEcdhPublicKey(friend.peerId)) ? (
+                          <>
+                            <Lock className="w-2.5 h-2.5 text-emerald-400" />
+                            <span className="text-emerald-300">E2EE (ECDH P-256)</span>
+                          </>
+                        ) : (
+                          <span>Ожидает обмена ключами</span>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -311,18 +381,40 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
                   />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-serif font-bold text-sm text-amber-200">{activeFriend.name}</h3>
-                    <span className="flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded-full">
-                      <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                      <span>E2EE Защита (AES-GCM)</span>
-                    </span>
+                    {isDemoBotFriend(activeFriend) ? (
+                      <span className="flex items-center gap-1 text-[10px] text-amber-300 bg-amber-950/60 border border-amber-700/50 px-2 py-0.5 rounded-full">
+                        <span>Демо-бот · без E2EE</span>
+                      </span>
+                    ) : safetyNumber ? (
+                      <span
+                        className="flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded-full"
+                        title={`Safety Number для сверки с собеседником: ${safetyNumber}`}
+                      >
+                        <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                        <span>E2EE ECDH P-256 · SN: {safetyNumber.slice(0, 11)}…</span>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-[10px] text-rose-300 bg-rose-950/60 border border-rose-800/40 px-2 py-0.5 rounded-full">
+                        <span>Ожидается обмен ключами ECDH</span>
+                      </span>
+                    )}
                   </div>
-                  <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                  <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5 flex-wrap">
                     <span>Статус:</span>
                     <strong className={activeFriend.status === 'online' ? 'text-emerald-400' : 'text-slate-400'}>
-                      {activeFriend.status === 'online' ? 'В сети (прямой P2P канал)' : 'Офлайн (включён режим почтальона пиров)'}
+                      {isDemoBotFriend(activeFriend)
+                        ? 'Локальный демо-куратор (для реального E2EE подключите пира по WebRTC)'
+                        : activeFriend.status === 'online'
+                        ? 'В сети (прямой WebRTC канал)'
+                        : 'Офлайн (режим DTN-конвертов)'}
                     </strong>
+                    {safetyNumber && !isDemoBotFriend(activeFriend) && (
+                      <span className="font-mono text-[10px] text-cyan-300/90 bg-slate-900/90 px-1.5 py-0.5 rounded border border-cyan-800/50">
+                        Safety Number: {safetyNumber}
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -414,8 +506,14 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
                         {/* Delivery Status & Crypto Badge */}
                         <div className="mt-2 pt-1.5 border-t border-white/10 flex items-center justify-between gap-2 text-[10px]">
                           <div className="flex items-center gap-1 text-slate-400">
-                            <Lock className="w-3 h-3 text-amber-400/90" />
-                            <span>E2EE</span>
+                            {msg.isDemoBot || !msg.isE2EE ? (
+                              <span className="text-slate-400">Демо-бот · без E2EE</span>
+                            ) : (
+                              <>
+                                <Lock className="w-3 h-3 text-emerald-400/90" />
+                                <span className="text-emerald-300">E2EE (ECDH)</span>
+                              </>
+                            )}
                             {msg.status === 'relayed_in_custody' && (
                               <span className="text-indigo-300 font-semibold bg-indigo-950 px-1.5 py-0.5 rounded border border-indigo-800/40">
                                 📦 В хранении у пиров-курьеров
@@ -582,11 +680,11 @@ export const P2PChatView: React.FC<P2PChatViewProps> = ({
               <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-800/40 space-y-1">
                 <h4 className="font-bold text-amber-200 text-sm flex items-center gap-1.5">
                   <Lock className="w-4 h-4 text-amber-400" />
-                  <span>1. Сквозное шифрование (End-to-End Encryption)</span>
+                  <span>1. Сквозное шифрование (ECDH P-256 + HKDF-SHA256 + AES-GCM)</span>
                 </h4>
                 <p>
-                  Каждое сообщение и вложенное полотно запечатываются алгоритмом <strong>AES-GCM (256 бит)</strong> на ключе, вычисленном между вами и адресатом.
-                  Ни один сервер или промежуточный пир-курьер <strong>не может расшифровать</strong> содержимое конверта.
+                  Для живых пиров каждое сообщение запечатывается алгоритмом <strong>AES-GCM (256 бит) с AAD</strong> на общем ключе, вычисленном через <strong>ECDH P-256 + HKDF</strong>.
+                  Вы можете сверить симметричный <strong>Safety Number</strong> с собеседником. Встроенные боты помечены как «Демо-бот · без E2EE».
                 </p>
               </div>
 

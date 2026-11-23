@@ -185,6 +185,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
         return;
       }
 
+      setGeneratedSeed('');
+      setRestoreInput('');
       onComplete(newProfile);
     } catch (err: unknown) {
       setPinError((err as Error)?.message || 'Не удалось сгенерировать крипто-профиль');
@@ -426,7 +428,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             )}
 
             <div className="p-3.5 rounded-2xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-200/90 leading-relaxed">
-              ⚠️ <strong>Важно для BIP-39:</strong> Запишите эти 12 слов на бумаге в точном порядке! Они понадобятся для восстановления доступа к локальным полотнам и P2P-идентичности. На следующем шаге система проверит, что вы их сохранили.
+              ⚠️ <strong>Важно для вашей приватности:</strong> эта фраза из 12 слов показывается <strong>один раз</strong> и <strong>НЕ сохраняется</strong> ни на сервере, ни в памяти устройства после завершения настройки. Запишите её сейчас — иначе восстановить профиль будет невозможно.
             </div>
 
             {/* 12 Words Grid */}
